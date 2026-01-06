@@ -1,0 +1,33 @@
+{
+  "name": "Pruva Reproduction Environment",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "latest"
+    }
+  },
+  "postCreateCommand": "curl -fsSL https://pruva.dev/install.sh -o /tmp/install.sh && chmod +x /tmp/install.sh && /tmp/install.sh",
+  "postStartCommand": ".devcontainer/run-reproduction.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "rust-lang.rust-analyzer"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "PRUVA_SANDBOX": "true"
+  }
+}

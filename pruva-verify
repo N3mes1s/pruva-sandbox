@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+#
+# pruva-verify - Verify a Pruva reproduction locally
+#
+# Usage:
+#   pruva-verify REPRO-2026-00006
+#   pruva-verify GHSA-655q-fx9r-782v
+#   pruva-verify CVE-2025-1716
+#
+# Environment:
+#   PRUVA_API_URL - API base URL (default: https://api.pruva.dev/v1)
+#   PRUVA_KEEP_DIR - Set to 1 to keep the temp directory after verification
+#
+set -euo pipefail
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Config
+API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
+KEEP_DIR="${PRUVA_KEEP_DIR:-0}"
+
+log() { echo -e "${CYAN}[pruva]${NC} $*"; }
+error() { echo -e "${RED}[pruva]${NC} $*" >&2; }
+success() { echo -e "${GREEN}[pruva]${NC} $*"; }
+warn() { echo -e "${YELLOW}[pruva]${NC} $*"; }
+
+usage() {
+  cat << EOF
+${BOLD}pruva-verify${NC} - Verify a Pruva reproduction locally
+
+${BOLD}USAGE:${NC}
+    pruva-verify <REPRO_ID|GHSA_ID|CVE_ID>
+
+${BOLD}EXAMPLES:${NC}
+    pruva-verify REPRO-2026-00006
+    pruva-verify GHSA-655q-fx9r-782v
+    pruva-verify CVE-2025-1716
+
+${BOLD}ENVIRONMENT:${NC}
+    PRUVA_API_URL    API base URL (default: https://api.pruva.dev/v1)
+    PRUVA_KEEP_DIR   Set to 1 to keep temp directory after verification
+
+${BOLD}OPTIONS:${NC}
+    -h, --help       Show this help message
+
+${BOLD}WHAT IT DOES:${NC}
+    1. Fetches reproduction metadata from Pruva API
+    2. Downloads the reproduction script
+    3. Runs it in an isolated temp directory
+    4. Reports SUCCESS or FAILURE with details
+
+${BOLD}WARNING:${NC}
+    This runs code that exploits real vulnerabilities.
+    Always run in a VM, container, or disposable environment.
+EOF
+}
+
+# Parse arguments
+if [[ $# -lt 1 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+INPUT="$1"
+
+# Determine the lookup endpoint based on input format
+resolve_repro_id() {
+  local input="$1"
+
+  if [[ "$input" =~ ^REPRO-[0-9]{4}-[0-9]+$ ]]; then
+    # Direct REPRO ID
+    echo "$input"
+  elif [[ "$input" =~ ^GHSA- ]]; then
+    # GHSA lookup
+    local response
+    response=$(curl -sf "${API_URL}/reproductions/lookup/ghsa/${input}" 2>/dev/null) || {
+      error "No reproduction found for ${input}"
+      exit 1
+    }
+    echo "$response" | jq -r '.repro_id'
+  elif [[ "$input" =~ ^CVE- ]]; then
+    # CVE lookup
+    local response
+    response=$(curl -sf "${API_URL}/reproductions/lookup/cve/${input}" 2>/dev/null) || {
+      error "No reproduction found for ${input}"
+      exit 1
+    }
+    echo "$response" | jq -r '.repro_id'
+  else
+    error "Invalid ID format: ${input}"
+    error "Expected: REPRO-YYYY-NNNNN, GHSA-xxxx-xxxx-xxxx, or CVE-YYYY-NNNNN"
+    exit 1
+  fi
+}
+
+# Check dependencies
+check_deps() {
+  local missing=()
+  for cmd in curl jq; do
+    if ! command -v "$cmd" &>/dev/null; then
+      missing+=("$cmd")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    error "Missing required dependencies: ${missing[*]}"
+    exit 1
+  fi
+}
+
+check_deps
+
+log "Resolving ${BOLD}${INPUT}${NC}..."
+REPRO_ID=$(resolve_repro_id "$INPUT")
+log "Found reproduction: ${BOLD}${REPRO_ID}${NC}"
+
+# Fetch reproduction metadata
+log "Fetching metadata..."
+METADATA=$(curl -sf "${API_URL}/reproductions/${REPRO_ID}" 2>/dev/null) || {
+  error "Failed to fetch reproduction metadata"
+  exit 1
+}
+
+TITLE=$(echo "$METADATA" | jq -r '.title // "Unknown"')
+SEVERITY=$(echo "$METADATA" | jq -r '.severity // "unknown"' | tr '[:lower:]' '[:upper:]')
+GHSA_ID=$(echo "$METADATA" | jq -r '.ghsa_id // empty')
+CVE_ID=$(echo "$METADATA" | jq -r '.cve_id // empty')
+
+echo ""
+echo -e "${BOLD}========================================${NC}"
+echo -e "${BOLD}${REPRO_ID}${NC}"
+echo -e "${BOLD}========================================${NC}"
+echo -e "${BOLD}Title:${NC}    ${TITLE}"
+echo -e "${BOLD}Severity:${NC} ${SEVERITY}"
+[[ -n "$GHSA_ID" ]] && echo -e "${BOLD}GHSA:${NC}     ${GHSA_ID}"
+[[ -n "$CVE_ID" ]] && echo -e "${BOLD}CVE:${NC}      ${CVE_ID}"
+echo -e "${BOLD}========================================${NC}"
+echo ""
+
+# Create temp directory
+WORK_DIR=$(mktemp -d -t "pruva-verify-${REPRO_ID}-XXXXXX")
+log "Working directory: ${WORK_DIR}"
+
+cleanup() {
+  if [[ "$KEEP_DIR" == "1" ]]; then
+    warn "Keeping work directory: ${WORK_DIR}"
+  else
+    rm -rf "$WORK_DIR"
+  fi
+}
+trap cleanup EXIT
+
+# Download reproduction script
+SCRIPT_URL="${API_URL}/reproductions/${REPRO_ID}/artifacts/reproduction_steps.sh"
+SCRIPT_PATH="${WORK_DIR}/reproduction_steps.sh"
+
+log "Downloading reproduction script..."
+if ! curl -sf "$SCRIPT_URL" -o "$SCRIPT_PATH" 2>/dev/null; then
+  error "Failed to download reproduction script"
+  error "URL: ${SCRIPT_URL}"
+  exit 1
+fi
+
+chmod +x "$SCRIPT_PATH"
+log "Script downloaded: $(wc -l < "$SCRIPT_PATH") lines"
+
+# Warning
+echo ""
+warn "=========================================="
+warn "  WARNING: This will execute code that"
+warn "  exploits a real vulnerability."
+warn "=========================================="
+echo ""
+
+# Ask for confirmation (skip if non-interactive)
+if [[ -t 0 ]]; then
+  read -p "Continue? [y/N] " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    log "Aborted."
+    exit 0
+  fi
+fi
+
+# Run the script
+log "Running reproduction script..."
+echo ""
+echo -e "${BOLD}--- REPRODUCTION OUTPUT ---${NC}"
+echo ""
+
+cd "$WORK_DIR"
+START_TIME=$(date +%s)
+
+if ./reproduction_steps.sh; then
+  END_TIME=$(date +%s)
+  DURATION=$((END_TIME - START_TIME))
+  echo ""
+  echo -e "${BOLD}--- END REPRODUCTION OUTPUT ---${NC}"
+  echo ""
+  success "=========================================="
+  success "  VERIFICATION SUCCESSFUL"
+  success "  Duration: ${DURATION}s"
+  success "=========================================="
+
+  # Show artifacts
+  if [[ -d "${WORK_DIR}/artifacts" ]]; then
+    log "Artifacts:"
+    ls -la "${WORK_DIR}/artifacts/" 2>/dev/null | tail -n +2 | while read -r line; do
+      echo "    $line"
+    done
+  fi
+
+  # Show logs summary
+  if [[ -d "${WORK_DIR}/logs" ]]; then
+    log "Logs available in: ${WORK_DIR}/logs/"
+  fi
+
+  exit 0
+else
+  EXIT_CODE=$?
+  END_TIME=$(date +%s)
+  DURATION=$((END_TIME - START_TIME))
+  echo ""
+  echo -e "${BOLD}--- END REPRODUCTION OUTPUT ---${NC}"
+  echo ""
+  error "=========================================="
+  error "  VERIFICATION FAILED (exit code: ${EXIT_CODE})"
+  error "  Duration: ${DURATION}s"
+  error "=========================================="
+
+  # Show logs for debugging
+  if [[ -f "${WORK_DIR}/logs/repro.log" ]]; then
+    error "Last 20 lines of repro.log:"
+    tail -20 "${WORK_DIR}/logs/repro.log" | while read -r line; do
+      echo "    $line"
+    done
+  fi
+
+  exit 1
+fi
