@@ -1,5 +1,7 @@
 # Pruva Sandbox
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/N3mes1s/pruva-sandbox)
+
 Isolated environment for running Pruva vulnerability reproductions via GitHub Codespaces.
 
 ## How It Works
