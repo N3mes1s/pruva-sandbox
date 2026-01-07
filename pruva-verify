@@ -25,7 +25,17 @@ NC='\033[0m' # No Color
 # Config
 API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
 KEEP_DIR="${PRUVA_KEEP_DIR:-1}"  # Keep results by default
-RESULTS_DIR="${PRUVA_RESULTS_DIR:-$HOME/pruva-results}"
+
+# In Codespaces, use workspace dir so files are visible in VS Code explorer
+if [[ -n "${PRUVA_RESULTS_DIR:-}" ]]; then
+  RESULTS_DIR="$PRUVA_RESULTS_DIR"
+elif [[ "${CODESPACES:-}" == "true" ]] && [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+  # GITHUB_REPOSITORY is "owner/repo-name", extract repo name for /workspaces/<repo>
+  REPO_NAME="${GITHUB_REPOSITORY##*/}"
+  RESULTS_DIR="/workspaces/${REPO_NAME}/pruva-results"
+else
+  RESULTS_DIR="$HOME/pruva-results"
+fi
 
 log() { echo -e "${CYAN}[pruva]${NC} $*"; }
 error() { echo -e "${RED}[pruva]${NC} $*" >&2; }
