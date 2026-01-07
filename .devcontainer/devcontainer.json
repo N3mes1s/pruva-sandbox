@@ -17,6 +17,7 @@
   },
   "remoteUser": "vscode",
   "containerEnv": {
-    "PRUVA_SANDBOX": "true"
+    "PRUVA_SANDBOX": "true",
+    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1"
   }
 }
