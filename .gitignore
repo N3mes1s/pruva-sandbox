@@ -1,0 +1,5 @@
+# Reproduction results (created by pruva-verify)
+pruva-results/
+
+# OS files
+.DS_Store

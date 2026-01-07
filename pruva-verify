@@ -24,7 +24,8 @@ NC='\033[0m' # No Color
 
 # Config
 API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
-KEEP_DIR="${PRUVA_KEEP_DIR:-0}"
+KEEP_DIR="${PRUVA_KEEP_DIR:-1}"  # Keep results by default
+RESULTS_DIR="${PRUVA_RESULTS_DIR:-$HOME/pruva-results}"
 
 log() { echo -e "${CYAN}[pruva]${NC} $*"; }
 error() { echo -e "${RED}[pruva]${NC} $*" >&2; }
@@ -143,8 +144,17 @@ echo -e "${BOLD}Severity:${NC} ${SEVERITY}"
 echo -e "${BOLD}========================================${NC}"
 echo ""
 
-# Create temp directory
-WORK_DIR=$(mktemp -d -t "pruva-verify-${REPRO_ID}-XXXXXX")
+# Create work directory in home (persists for user inspection)
+mkdir -p "$RESULTS_DIR"
+WORK_DIR="${RESULTS_DIR}/${REPRO_ID}"
+
+# Clean previous run if exists
+if [[ -d "$WORK_DIR" ]]; then
+  log "Removing previous run directory..."
+  rm -rf "$WORK_DIR"
+fi
+
+mkdir -p "$WORK_DIR"
 log "Working directory: ${WORK_DIR}"
 
 cleanup() {
@@ -242,19 +252,25 @@ if "./${SCRIPT_ARTIFACT}"; then
   success "  VERIFICATION SUCCESSFUL"
   success "  Duration: ${DURATION}s"
   success "=========================================="
+  echo ""
 
-  # Show artifacts
-  if [[ -d "${WORK_DIR}/artifacts" ]]; then
-    log "Artifacts:"
-    ls -la "${WORK_DIR}/artifacts/" 2>/dev/null | tail -n +2 | while read -r line; do
-      echo "    $line"
-    done
+  # Show result.json if exists
+  if [[ -f "${WORK_DIR}/logs/result.json" ]]; then
+    log "Result:"
+    cat "${WORK_DIR}/logs/result.json" | head -1
+    echo ""
   fi
 
   # Show logs summary
   if [[ -d "${WORK_DIR}/logs" ]]; then
-    log "Logs available in: ${WORK_DIR}/logs/"
+    log "Logs: ${WORK_DIR}/logs/"
+    ls -1 "${WORK_DIR}/logs/" 2>/dev/null | while read -r f; do
+      echo "    - $f"
+    done
   fi
+
+  echo ""
+  log "Results saved to: ${BOLD}${WORK_DIR}${NC}"
 
   exit 0
 else
@@ -268,14 +284,25 @@ else
   error "  VERIFICATION FAILED (exit code: ${EXIT_CODE})"
   error "  Duration: ${DURATION}s"
   error "=========================================="
+  echo ""
 
   # Show logs for debugging
-  if [[ -f "${WORK_DIR}/logs/repro.log" ]]; then
-    error "Last 20 lines of repro.log:"
-    tail -20 "${WORK_DIR}/logs/repro.log" | while read -r line; do
-      echo "    $line"
+  if [[ -d "${WORK_DIR}/logs" ]]; then
+    error "Logs: ${WORK_DIR}/logs/"
+    ls -1 "${WORK_DIR}/logs/" 2>/dev/null | while read -r f; do
+      echo "    - $f"
     done
+    echo ""
+    if [[ -f "${WORK_DIR}/logs/repro.log" ]]; then
+      error "Last 20 lines of repro.log:"
+      tail -20 "${WORK_DIR}/logs/repro.log" | while read -r line; do
+        echo "    $line"
+      done
+    fi
   fi
+
+  echo ""
+  log "Results saved to: ${BOLD}${WORK_DIR}${NC}"
 
   exit 1
 fi
