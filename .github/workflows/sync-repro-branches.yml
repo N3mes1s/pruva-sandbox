@@ -1,0 +1,75 @@
+name: Sync Repro Branches
+
+# When devcontainer config changes on main, update all repro/* branches
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.devcontainer/**'
+      - 'pruva-verify'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync repro branches
+        run: |
+          # Get all remote repro/* branches
+          REPRO_BRANCHES=$(git branch -r | grep 'origin/repro/' | sed 's/origin\///' || true)
+
+          if [ -z "$REPRO_BRANCHES" ]; then
+            echo "No repro branches found"
+            exit 0
+          fi
+
+          echo "Found repro branches:"
+          echo "$REPRO_BRANCHES"
+          echo ""
+
+          FAILED=""
+          SUCCESS=""
+
+          for branch in $REPRO_BRANCHES; do
+            echo "=== Syncing $branch ==="
+
+            # Checkout the repro branch
+            git checkout "$branch" || { FAILED="$FAILED $branch"; continue; }
+
+            # Merge main (fast-forward if possible, otherwise merge commit)
+            if git merge origin/main --no-edit -m "chore: sync devcontainer from main"; then
+              # Push the updated branch
+              git push origin "$branch"
+              SUCCESS="$SUCCESS $branch"
+              echo "✓ $branch synced"
+            else
+              # If merge fails, abort and record
+              git merge --abort 2>/dev/null || true
+              FAILED="$FAILED $branch"
+              echo "✗ $branch failed to sync (merge conflict)"
+            fi
+
+            echo ""
+          done
+
+          # Summary
+          echo "=========================================="
+          echo "Sync Summary"
+          echo "=========================================="
+          if [ -n "$SUCCESS" ]; then
+            echo "✓ Synced:$SUCCESS"
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "✗ Failed:$FAILED"
+            exit 1
+          fi
