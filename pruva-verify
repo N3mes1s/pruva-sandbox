@@ -178,8 +178,10 @@ warn "  exploits a real vulnerability."
 warn "=========================================="
 echo ""
 
-# Ask for confirmation (skip if non-interactive)
-if [[ -t 0 ]]; then
+# Ask for confirmation (skip in Codespaces or non-interactive)
+if [[ "${CODESPACES:-}" == "true" ]] || [[ "${PRUVA_SANDBOX:-}" == "true" ]]; then
+  log "Auto-confirming in sandbox environment..."
+elif [[ -t 0 ]]; then
   read -p "Continue? [y/N] " -n 1 -r
   echo
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
