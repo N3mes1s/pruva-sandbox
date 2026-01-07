@@ -156,9 +156,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Download reproduction script
-SCRIPT_URL="${API_URL}/reproductions/${REPRO_ID}/artifacts/reproduction_steps.sh"
-SCRIPT_PATH="${WORK_DIR}/reproduction_steps.sh"
+# Find the reproduction script from metadata
+# Use reproduction_script field if set, otherwise find largest reproduction_script artifact
+SCRIPT_ARTIFACT=$(echo "$METADATA" | jq -r '
+  if .reproduction_script != null then
+    .reproduction_script
+  else
+    [.artifacts[] | select(.category == "reproduction_script")] | sort_by(.size) | last | .path
+  end // empty
+')
+
+if [[ -z "$SCRIPT_ARTIFACT" ]]; then
+  error "No reproduction script found in metadata"
+  exit 1
+fi
+
+log "Found script artifact: ${SCRIPT_ARTIFACT}"
+
+# Create directory structure and download
+SCRIPT_DIR=$(dirname "$SCRIPT_ARTIFACT")
+if [[ "$SCRIPT_DIR" != "." ]]; then
+  mkdir -p "${WORK_DIR}/${SCRIPT_DIR}"
+fi
+SCRIPT_PATH="${WORK_DIR}/${SCRIPT_ARTIFACT}"
+SCRIPT_URL="${API_URL}/reproductions/${REPRO_ID}/artifacts/${SCRIPT_ARTIFACT}"
 
 log "Downloading reproduction script..."
 if ! curl -sf "$SCRIPT_URL" -o "$SCRIPT_PATH" 2>/dev/null; then
@@ -169,6 +190,18 @@ fi
 
 chmod +x "$SCRIPT_PATH"
 log "Script downloaded: $(wc -l < "$SCRIPT_PATH") lines"
+
+# Make script portable by replacing hardcoded paths
+# Scripts may have BASE_DIR="/root/.pruva/runs/.../bundle" or similar
+# We need to rewrite these to use WORK_DIR instead
+ORIGINAL_BASE=$(grep 'BASE_DIR=' "$SCRIPT_PATH" | head -1 | sed -n 's/.*BASE_DIR="\([^"]*\)".*/\1/p' || true)
+if [[ -n "$ORIGINAL_BASE" ]]; then
+  log "Rewriting paths: ${ORIGINAL_BASE} → ${WORK_DIR}"
+  # Use temp file for portability (macOS sed -i requires extension)
+  sed "s|${ORIGINAL_BASE}|${WORK_DIR}|g" "$SCRIPT_PATH" > "${SCRIPT_PATH}.tmp"
+  mv "${SCRIPT_PATH}.tmp" "$SCRIPT_PATH"
+  chmod +x "$SCRIPT_PATH"
+fi
 
 # Warning
 echo ""
@@ -199,7 +232,7 @@ echo ""
 cd "$WORK_DIR"
 START_TIME=$(date +%s)
 
-if ./reproduction_steps.sh; then
+if "./${SCRIPT_ARTIFACT}"; then
   END_TIME=$(date +%s)
   DURATION=$((END_TIME - START_TIME))
   echo ""
