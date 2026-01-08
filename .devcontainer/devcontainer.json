@@ -1,7 +1,7 @@
 {
   "name": "Pruva Reproduction Environment",
   "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
-  "postStartCommand": ".devcontainer/run-reproduction.sh",
+  "postStartCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
   "customizations": {
     "vscode": {
       "extensions": [
