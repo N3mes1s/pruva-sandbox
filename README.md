@@ -14,11 +14,13 @@ Isolated environment for running Pruva vulnerability reproductions via GitHub Co
 
 Click "Open in Codespaces" on any reproduction at [pruva.dev](https://pruva.dev/reproductions).
 
-Or use a direct URL with any reproduction ID:
+Or use a direct URL with any reproduction ID (using the branch path format):
 
 ```
-https://codespaces.new/N3mes1s/pruva-sandbox?env[REPRO_ID]=REPRO-2026-00006
+https://codespaces.new/N3mes1s/pruva-sandbox/tree/repro/REPRO-2026-00006
 ```
+
+> **Note:** The REPRO_ID is encoded in the branch name (`repro/<ID>`). GitHub Codespaces does not support passing environment variables via URL parameters.
 
 ## Install pruva-verify Locally
 
