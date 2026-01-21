@@ -1,7 +1,7 @@
 {
   "name": "Pruva Reproduction Environment",
   "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
-  "postStartCommand": ".devcontainer/run-reproduction.sh",
+  "postStartCommand": "[ -n \"$REPRO_ID\" ] && sudo -E pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: sudo pruva-verify <REPRO-ID>'",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -18,6 +18,7 @@
   "remoteUser": "vscode",
   "containerEnv": {
     "PRUVA_SANDBOX": "true",
-    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1"
+    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1",
+    "REPRO_ID": "REPRO-2026-00001"
   }
 }
