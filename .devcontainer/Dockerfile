@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y \
     unzip \
     build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/python3 /usr/bin/python \
-    && ln -s /usr/bin/pip3 /usr/bin/pip
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip
 
 # Install Node.js LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
