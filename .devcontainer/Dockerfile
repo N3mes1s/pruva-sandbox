@@ -3,7 +3,7 @@
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-# Install Python (default version) and Node.js
+# Install common build dependencies for reproductions
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \
@@ -14,6 +14,16 @@ RUN apt-get update && apt-get install -y \
     jq \
     unzip \
     build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    zlib1g-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    libgflags-dev \
+    libgoogle-glog-dev \
+    libleveldb-dev \
+    liblz4-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
