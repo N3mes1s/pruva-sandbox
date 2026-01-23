@@ -26,7 +26,8 @@ RUN apt-get update && apt-get install -y \
     liblz4-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Install Node.js LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
