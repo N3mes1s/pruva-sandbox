@@ -127,6 +127,12 @@ check_deps() {
 
 check_deps
 
+# Load and display environment version
+if [[ -f "/etc/pruva-sandbox-version" ]]; then
+  source /etc/pruva-sandbox-version
+  log "Environment: pruva-sandbox ${PRUVA_SANDBOX_VERSION:-unknown} (${PRUVA_SANDBOX_SHA:-unknown})"
+fi
+
 log "Resolving ${BOLD}${INPUT}${NC}..."
 REPRO_ID=$(resolve_repro_id "$INPUT")
 log "Found reproduction: ${BOLD}${REPRO_ID}${NC}"
@@ -142,6 +148,14 @@ TITLE=$(echo "$METADATA" | jq -r '.title // "Unknown"')
 SEVERITY=$(echo "$METADATA" | jq -r '.severity // "unknown"' | tr '[:lower:]' '[:upper:]')
 GHSA_ID=$(echo "$METADATA" | jq -r '.ghsa_id // empty')
 CVE_ID=$(echo "$METADATA" | jq -r '.cve_id // empty')
+
+# Check for environment version mismatch
+REQUIRED_ENV=$(echo "$METADATA" | jq -r '.environment.sandbox_version // empty')
+if [[ -n "$REQUIRED_ENV" ]] && [[ -n "${PRUVA_SANDBOX_VERSION:-}" ]]; then
+  if [[ "$PRUVA_SANDBOX_VERSION" != "$REQUIRED_ENV" ]]; then
+    warn "Version mismatch: reproduction created with ${REQUIRED_ENV}, running in ${PRUVA_SANDBOX_VERSION}"
+  fi
+fi
 
 echo ""
 echo -e "${BOLD}========================================${NC}"

@@ -3,6 +3,13 @@
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
+# Build arguments for version tracking
+ARG BUILD_DATE=unknown
+ARG GIT_SHA=unknown
+
+LABEL io.pruva.sandbox.version="${BUILD_DATE}"
+LABEL io.pruva.sandbox.revision="${GIT_SHA}"
+
 # Install common build dependencies for reproductions
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -37,6 +44,13 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # Pre-install pruva-verify
 COPY pruva-verify /usr/local/bin/pruva-verify
 RUN chmod +x /usr/local/bin/pruva-verify
+
+# Create environment manifest for version tracking
+RUN echo "PRUVA_SANDBOX_VERSION=${BUILD_DATE}" > /etc/pruva-sandbox-version && \
+    echo "PRUVA_SANDBOX_SHA=${GIT_SHA}" >> /etc/pruva-sandbox-version && \
+    python3 --version 2>&1 | sed 's/^/PRUVA_SANDBOX_PYTHON=/' >> /etc/pruva-sandbox-version && \
+    node --version 2>&1 | sed 's/^/PRUVA_SANDBOX_NODE=/' >> /etc/pruva-sandbox-version && \
+    gcc --version 2>&1 | head -1 | sed 's/^/PRUVA_SANDBOX_GCC=/' >> /etc/pruva-sandbox-version
 
 # Set up user
 USER vscode

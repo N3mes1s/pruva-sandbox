@@ -41,6 +41,29 @@ pruva-verify GHSA-655q-fx9r-782v
 pruva-verify CVE-2025-1716
 ```
 
+## Advanced: Docker-in-Docker for Special Cases
+
+Some reproductions require specific OS versions, library versions, or network isolation that the standard sandbox doesn't provide. For these cases, use Docker-in-Docker:
+
+```bash
+#!/bin/bash
+# Use a specific sandbox version for reproducibility
+SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-ghcr.io/n3mes1s/pruva-sandbox:2025.01.26}"
+
+docker run --rm -v "$PWD:/work" -w /work "$SANDBOX_IMAGE" bash -c '
+  pip install vulnerable-lib==1.2.3
+  python exploit.py
+'
+```
+
+**When to use Docker-in-Docker:**
+- Kernel vulnerabilities requiring specific kernel versions
+- Library vulnerabilities requiring exact vulnerable versions
+- Network isolation for simulating attack scenarios
+- Reproductions that modify system-level configurations
+
+**Note:** The standard sandbox (Codespaces or local) is preferred for most cases. Only use Docker-in-Docker when the reproduction explicitly requires environment isolation.
+
 ## Security
 
 - Reproductions run in isolated Codespace containers
