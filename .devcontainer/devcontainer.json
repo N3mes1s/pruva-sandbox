@@ -2,6 +2,9 @@
   "name": "Pruva Reproduction Environment",
   "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
   "postCreateCommand": "[ -n \"$REPRO_ID\" ] && sudo -H -E pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: sudo -H pruva-verify <REPRO-ID>'",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
   "customizations": {
     "vscode": {
       "extensions": [

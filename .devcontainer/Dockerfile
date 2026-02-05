@@ -31,6 +31,8 @@ RUN apt-get update && apt-get install -y \
     libgoogle-glog-dev \
     libleveldb-dev \
     liblz4-dev \
+    ripgrep \
+    docker.io \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
