@@ -20,10 +20,10 @@ jobs:
         run: |
           ALLOWED_USERS="n3mes1s"
           if [[ ! " $ALLOWED_USERS " =~ " ${{ github.actor }} " ]]; then
-            echo "❌ Unauthorized: Only $ALLOWED_USERS can run this workflow"
+            echo "ERROR: Unauthorized - Only $ALLOWED_USERS can run this workflow"
             exit 1
           fi
-          echo "✅ Authorized: ${{ github.actor }}"
+          echo "OK: Authorized user ${{ github.actor }}"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,12 +64,12 @@ jobs:
 
             # Check if branch already exists
             if echo "$EXISTING_BRANCHES" | grep -q "^$BRANCH$"; then
-              echo "⏭️  $BRANCH already exists, skipping"
+              echo "SKIP: $BRANCH already exists"
               SKIPPED=$((SKIPPED + 1))
               continue
             fi
 
-            echo "✨ Creating branch: $BRANCH"
+            echo "CREATE: $BRANCH"
 
             # Create branch from main
             git checkout -b "$BRANCH" origin/main
@@ -95,8 +95,8 @@ Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
           echo ""
           echo "=========================================="
           echo "Summary:"
-          echo "  ✨ Created: $CREATED"
-          echo "  ⏭️  Skipped: $SKIPPED"
+          echo "  Created: $CREATED"
+          echo "  Skipped: $SKIPPED"
           echo "=========================================="
 
           if [ $CREATED -eq 0 ]; then
