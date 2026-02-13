@@ -1,11 +1,13 @@
 {
-  "name": "Pruva Reproduction Environment",
-  "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
-  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  "containerEnv": {
+    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1",
+    "PRUVA_SANDBOX": "true",
+    "REPRO_ID": "REPRO-2026-00087"
   },
   "customizations": {
+    "codespaces": {
+      "openFiles": []
+    },
     "vscode": {
       "extensions": [
         "ms-python.python"
@@ -13,15 +15,13 @@
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash"
       }
-    },
-    "codespaces": {
-      "openFiles": []
     }
   },
-  "remoteUser": "vscode",
-  "containerEnv": {
-    "PRUVA_SANDBOX": "true",
-    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1",
-    "REPRO_ID": ""
-  }
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
+  "name": "Pruva Reproduction Environment",
+  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
+  "remoteUser": "vscode"
 }
