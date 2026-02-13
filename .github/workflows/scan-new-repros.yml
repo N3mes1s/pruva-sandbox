@@ -55,15 +55,42 @@ jobs:
           echo ""
 
           CREATED=0
+          FIXED=0
           SKIPPED=0
 
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
 
-            # Check if branch already exists on remote
+            # Check if branch exists and if it's properly configured
             if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
-              echo "SKIP: $BRANCH already exists"
-              SKIPPED=$((SKIPPED + 1))
+              # Branch exists - check if REPRO_ID is set correctly
+              CURRENT_ID=$(curl -sf "https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/$BRANCH/.devcontainer/devcontainer.json" | grep '"REPRO_ID"' | grep -o 'REPRO-[0-9]\{4\}-[0-9]\{5\}' || echo "")
+
+              if [ "$CURRENT_ID" = "$REPRO_ID" ]; then
+                echo "SKIP: $BRANCH already configured correctly"
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
+
+              echo "FIX: $BRANCH (current: ${CURRENT_ID:-empty}, expected: $REPRO_ID)"
+
+              # Checkout existing branch and fix it
+              git fetch origin "$BRANCH:$BRANCH"
+              git checkout "$BRANCH"
+
+              # Update devcontainer.json to set correct REPRO_ID
+              sed -i "s/\"REPRO_ID\": \"[^\"]*\"/\"REPRO_ID\": \"$REPRO_ID\"/" .devcontainer/devcontainer.json
+
+              # Commit and force-push fix
+              git add .devcontainer/devcontainer.json
+              git commit -m "fix: set REPRO_ID=$REPRO_ID for this branch" \
+                -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
+              git push --force-with-lease origin "$BRANCH"
+
+              FIXED=$((FIXED + 1))
+
+              # Return to main
+              git checkout main
               continue
             fi
 
@@ -93,9 +120,10 @@ jobs:
           echo "=========================================="
           echo "Summary:"
           echo "  Created: $CREATED"
+          echo "  Fixed: $FIXED"
           echo "  Skipped: $SKIPPED"
           echo "=========================================="
 
-          if [ $CREATED -eq 0 ]; then
-            echo "No new branches created - all reproductions already have branches"
+          if [ $CREATED -eq 0 ] && [ $FIXED -eq 0 ]; then
+            echo "No changes needed - all branches are correctly configured"
           fi
