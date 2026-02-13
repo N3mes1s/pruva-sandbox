@@ -22,6 +22,6 @@
   "containerEnv": {
     "PRUVA_SANDBOX": "true",
     "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1",
-    "REPRO_ID": ""
+    "REPRO_ID": "REPRO-2026-00084"
   }
 }
