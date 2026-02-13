@@ -54,7 +54,8 @@ jobs:
           echo "$REPROS"
           echo ""
 
-          # Get existing repro branches
+          # Get existing repro branches (fetch first to ensure up-to-date)
+          git fetch origin
           EXISTING_BRANCHES=$(git branch -r | grep 'origin/repro/REPRO-' | sed 's|.*/||' || true)
 
           CREATED=0
