@@ -1,7 +1,7 @@
 {
   "name": "Pruva Reproduction Environment",
   "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
-  "postCreateCommand": "REPRO_ID=$(cd /workspaces/pruva-sandbox && { git branch --show-current; git log -1 --format=%D HEAD; git branch -r --points-at HEAD; } 2>/dev/null | grep -o 'REPRO-[0-9]\\{4\\}-[0-9]\\{5\\}' | head -1) && [ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
+  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
