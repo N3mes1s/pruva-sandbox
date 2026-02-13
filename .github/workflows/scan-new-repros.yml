@@ -1,4 +1,5 @@
 # Internal workflow - restricted access
+# Force refresh for GitHub Actions cache
 name: "[Internal] Scan for New Reproductions"
 
 on:
@@ -79,9 +80,8 @@ jobs:
 
             # Commit changes
             git add .devcontainer/devcontainer.json
-            git commit -m "chore: set REPRO_ID=$REPRO_ID for this branch
-
-Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
+            git commit -m "chore: set REPRO_ID=$REPRO_ID for this branch" \
+              -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
 
             # Push branch
             git push origin "$BRANCH"
