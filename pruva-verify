@@ -191,12 +191,13 @@ cleanup() {
 trap cleanup EXIT
 
 # Find the reproduction script from metadata
-# Use reproduction_script field if set, otherwise find largest reproduction_script artifact
+# Use reproduction_script field if set, otherwise prefer repro/ path, then largest
 SCRIPT_ARTIFACT=$(echo "$METADATA" | jq -r '
-  if .reproduction_script != null then
+  if .reproduction_script then
     .reproduction_script
   else
-    [.artifacts[] | select(.category == "reproduction_script")] | sort_by(.size) | last | .path
+    ([.artifacts[] | select(.category == "reproduction_script" and (.path | startswith("repro/")))] | first | .path) //
+    ([.artifacts[] | select(.category == "reproduction_script")] | sort_by(.size) | last | .path)
   end // empty
 ')
 
