@@ -19,9 +19,9 @@ jobs:
     steps:
       - name: Check authorization
         run: |
-          ALLOWED_USERS="n3mes1s"
+          ALLOWED_USERS="n3mes1s N3mes1s"
           if [[ ! " $ALLOWED_USERS " =~ " ${{ github.actor }} " ]]; then
-            echo "ERROR: Unauthorized - Only $ALLOWED_USERS can run this workflow"
+            echo "ERROR: Unauthorized - Only n3mes1s can run this workflow"
             exit 1
           fi
           echo "OK: Authorized user ${{ github.actor }}"
