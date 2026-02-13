@@ -1,0 +1,94 @@
+name: Scan for New Reproductions
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Pruva API URL'
+        required: false
+        default: 'https://pruva-api-production.up.railway.app/v1'
+
+jobs:
+  scan-and-create-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch all reproductions and create branches
+        env:
+          API_URL: ${{ inputs.api_url }}
+        run: |
+          echo "Fetching reproductions from $API_URL..."
+
+          # Fetch all reproductions (paginated)
+          REPROS=$(curl -sf "$API_URL/reproductions?status=published&limit=1000" | jq -r '.items[].repro_id')
+
+          if [ -z "$REPROS" ]; then
+            echo "No reproductions found or API error"
+            exit 1
+          fi
+
+          echo "Found reproductions:"
+          echo "$REPROS"
+          echo ""
+
+          # Get existing repro branches
+          EXISTING_BRANCHES=$(git branch -r | grep 'origin/repro/REPRO-' | sed 's|.*/||' || true)
+
+          CREATED=0
+          SKIPPED=0
+
+          for REPRO_ID in $REPROS; do
+            BRANCH="repro/$REPRO_ID"
+
+            # Check if branch already exists
+            if echo "$EXISTING_BRANCHES" | grep -q "^$BRANCH$"; then
+              echo "⏭️  $BRANCH already exists, skipping"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "✨ Creating branch: $BRANCH"
+
+            # Create branch from main
+            git checkout -b "$BRANCH" origin/main
+
+            # Update devcontainer.json to set REPRO_ID
+            sed -i "s/\"REPRO_ID\": \"\"/\"REPRO_ID\": \"$REPRO_ID\"/" .devcontainer/devcontainer.json
+
+            # Commit changes
+            git add .devcontainer/devcontainer.json
+            git commit -m "chore: set REPRO_ID=$REPRO_ID for this branch
+
+Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
+
+            # Push branch
+            git push origin "$BRANCH"
+
+            CREATED=$((CREATED + 1))
+
+            # Return to main for next iteration
+            git checkout main
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "Summary:"
+          echo "  ✨ Created: $CREATED"
+          echo "  ⏭️  Skipped: $SKIPPED"
+          echo "=========================================="
+
+          if [ $CREATED -eq 0 ]; then
+            echo "No new branches created - all reproductions already have branches"
+          fi
