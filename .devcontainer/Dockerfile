@@ -50,9 +50,9 @@ RUN chmod +x /usr/local/bin/pruva-verify
 # Create environment manifest for version tracking
 RUN echo "PRUVA_SANDBOX_VERSION=${BUILD_DATE}" > /etc/pruva-sandbox-version && \
     echo "PRUVA_SANDBOX_SHA=${GIT_SHA}" >> /etc/pruva-sandbox-version && \
-    python3 --version 2>&1 | sed 's/^/PRUVA_SANDBOX_PYTHON=/' >> /etc/pruva-sandbox-version && \
-    node --version 2>&1 | sed 's/^/PRUVA_SANDBOX_NODE=/' >> /etc/pruva-sandbox-version && \
-    gcc --version 2>&1 | head -1 | sed 's/^/PRUVA_SANDBOX_GCC=/' >> /etc/pruva-sandbox-version
+    python3 --version 2>&1 | sed 's/^/PRUVA_SANDBOX_PYTHON="/' | sed 's/$/"/' >> /etc/pruva-sandbox-version && \
+    node --version 2>&1 | sed 's/^/PRUVA_SANDBOX_NODE="/' | sed 's/$/"/' >> /etc/pruva-sandbox-version && \
+    gcc --version 2>&1 | head -1 | sed 's/^/PRUVA_SANDBOX_GCC="/' | sed 's/$/"/' >> /etc/pruva-sandbox-version
 
 # Set up user
 USER vscode
