@@ -54,18 +54,14 @@ jobs:
           echo "$REPROS"
           echo ""
 
-          # Get existing repro branches (fetch first to ensure up-to-date)
-          git fetch origin
-          EXISTING_BRANCHES=$(git branch -r | grep 'origin/repro/REPRO-' | sed 's|.*/||' || true)
-
           CREATED=0
           SKIPPED=0
 
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
 
-            # Check if branch already exists
-            if echo "$EXISTING_BRANCHES" | grep -q "^$BRANCH$"; then
+            # Check if branch already exists on remote
+            if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
               echo "SKIP: $BRANCH already exists"
               SKIPPED=$((SKIPPED + 1))
               continue
