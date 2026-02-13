@@ -43,7 +43,7 @@ jobs:
           echo "Fetching reproductions from $API_URL..."
 
           # Fetch all reproductions (paginated)
-          REPROS=$(curl -sf "$API_URL/reproductions?status=published&limit=1000" | jq -r '.items[].repro_id')
+          REPROS=$(curl -sf "$API_URL/reproductions?status=published&limit=1000" | jq -r '.reproductions[].repro_id')
 
           if [ -z "$REPROS" ]; then
             echo "No reproductions found or API error"
