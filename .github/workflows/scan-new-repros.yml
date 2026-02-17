@@ -1,4 +1,4 @@
-# Internal workflow - restricted access
+# Internal workflow
 # Force refresh for GitHub Actions cache
 name: "[Internal] Scan for New Reproductions"
 
@@ -17,15 +17,6 @@ jobs:
       contents: write
 
     steps:
-      - name: Check authorization
-        run: |
-          ALLOWED_USERS="n3mes1s N3mes1s"
-          if [[ ! " $ALLOWED_USERS " =~ " ${{ github.actor }} " ]]; then
-            echo "ERROR: Unauthorized - Only n3mes1s can run this workflow"
-            exit 1
-          fi
-          echo "OK: Authorized user ${{ github.actor }}"
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
