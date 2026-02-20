@@ -1,0 +1,447 @@
+name: Test Codespace Reproductions
+
+on:
+  # Can be triggered manually
+  workflow_dispatch:
+    inputs:
+      latest_count:
+        description: 'Number of latest repro branches to test'
+        required: false
+        default: '10'
+      specific_repro:
+        description: 'Test a specific REPRO_ID (e.g. REPRO-2026-00105). Leave empty to test latest N.'
+        required: false
+        default: ''
+      timeout_minutes:
+        description: 'Timeout per reproduction (minutes)'
+        required: false
+        default: '30'
+
+  # Can be called from other workflows (e.g. scan-new-repros)
+  workflow_call:
+    inputs:
+      latest_count:
+        type: string
+        required: false
+        default: '10'
+      specific_repro:
+        type: string
+        required: false
+        default: ''
+      timeout_minutes:
+        type: string
+        required: false
+        default: '30'
+
+  # Weekly schedule
+  schedule:
+    - cron: '0 6 * * 1'
+
+env:
+  API_URL: https://pruva-api-production.up.railway.app/v1
+  REGISTRY: ghcr.io
+
+jobs:
+  # Job 1: Discover which REPRO_IDs to test
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+      count: ${{ steps.build-matrix.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all remote branches
+        run: git fetch --all
+
+      - name: Build test matrix
+        id: build-matrix
+        env:
+          LATEST_COUNT: ${{ inputs.latest_count || '10' }}
+          SPECIFIC_REPRO: ${{ inputs.specific_repro || '' }}
+        run: |
+          if [ -n "$SPECIFIC_REPRO" ]; then
+            echo "Testing specific repro: $SPECIFIC_REPRO"
+            REPRO_IDS="$SPECIFIC_REPRO"
+          else
+            echo "Finding latest $LATEST_COUNT repro branches..."
+            REPRO_IDS=$(git branch -r --sort=-committerdate \
+              | grep 'origin/repro/REPRO-' \
+              | head -n "$LATEST_COUNT" \
+              | sed 's|.*origin/repro/||' \
+              | xargs)
+          fi
+
+          echo "Repro IDs to test:"
+          echo "$REPRO_IDS"
+
+          # Build JSON matrix
+          JSON="["
+          FIRST=true
+          COUNT=0
+          for id in $REPRO_IDS; do
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              JSON="$JSON,"
+            fi
+            JSON="$JSON\"$id\""
+            COUNT=$((COUNT + 1))
+          done
+          JSON="$JSON]"
+
+          echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Matrix: $JSON"
+          echo "Count: $COUNT"
+
+  # Job 2: Lightweight validation (no Docker, fast)
+  validate-branches:
+    runs-on: ubuntu-latest
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all remote branches
+        run: git fetch --all
+
+      - name: Run branch validation
+        run: |
+          chmod +x scripts/test-codespaces.sh
+          ./scripts/test-codespaces.sh --latest ${{ inputs.latest_count || '10' }}
+
+  # Job 3: Full Docker-based test (runs pruva-verify inside the container)
+  test-in-container:
+    runs-on: ubuntu-latest
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        repro_id: ${{ fromJson(needs.discover.outputs.matrix) }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '30') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          push: false
+          load: true
+          tags: pruva-sandbox:test
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:latest
+
+      - name: Run pruva-verify for ${{ matrix.repro_id }}
+        id: verify
+        continue-on-error: true
+        run: |
+          echo "::group::Running pruva-verify ${{ matrix.repro_id }}"
+
+          # Run pruva-verify inside the container, mimicking Codespace startup
+          docker run --rm \
+            -e PRUVA_SANDBOX=true \
+            -e PRUVA_API_URL="${API_URL}" \
+            -e REPRO_ID="${{ matrix.repro_id }}" \
+            -e PRUVA_RESULTS_DIR="/tmp/pruva-results" \
+            pruva-sandbox:test \
+            bash -c 'pruva-verify "$REPRO_ID"' \
+            2>&1 | tee "/tmp/pruva-${{ matrix.repro_id }}.log" || true
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "::endgroup::"
+
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "✅ ${{ matrix.repro_id }}: PASSED"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "❌ ${{ matrix.repro_id }}: FAILED (exit code $EXIT_CODE)"
+          fi
+
+      - name: Detect missing dependencies
+        id: detect-deps
+        if: steps.verify.outputs.result == 'failure'
+        run: |
+          chmod +x scripts/detect-missing-deps.sh
+          LOG="/tmp/pruva-${{ matrix.repro_id }}.log"
+
+          echo "::group::Analyzing failure log for missing dependencies"
+          DEPS_JSON=$(./scripts/detect-missing-deps.sh "$LOG" --json)
+          echo "$DEPS_JSON" | jq .
+          echo "::endgroup::"
+
+          TOTAL=$(echo "$DEPS_JSON" | jq '.total_missing')
+          echo "missing_count=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "deps_json=$DEPS_JSON" >> "$GITHUB_OUTPUT"
+
+          APT=$(echo "$DEPS_JSON" | jq -r '.apt_packages | join(" ")')
+          PIP=$(echo "$DEPS_JSON" | jq -r '.pip_packages | join(" ")')
+          NPM=$(echo "$DEPS_JSON" | jq -r '.npm_packages | join(" ")')
+
+          echo "apt_packages=$APT" >> "$GITHUB_OUTPUT"
+          echo "pip_packages=$PIP" >> "$GITHUB_OUTPUT"
+          echo "npm_packages=$NPM" >> "$GITHUB_OUTPUT"
+
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "⚠️ Detected $TOTAL missing dependencies for ${{ matrix.repro_id }}"
+            echo "$DEPS_JSON" | jq .
+          else
+            echo "No missing dependencies detected - failure is not due to missing tools"
+          fi
+
+      - name: Retry with missing dependencies installed
+        id: retry
+        if: steps.detect-deps.outputs.missing_count > 0
+        run: |
+          echo "::group::Retrying ${{ matrix.repro_id }} with additional dependencies"
+
+          APT="${{ steps.detect-deps.outputs.apt_packages }}"
+          PIP="${{ steps.detect-deps.outputs.pip_packages }}"
+          NPM="${{ steps.detect-deps.outputs.npm_packages }}"
+
+          # Build install commands to run before pruva-verify
+          INSTALL_CMD=""
+          if [ -n "$APT" ]; then
+            INSTALL_CMD="apt-get update && apt-get install -y $APT && "
+          fi
+          if [ -n "$PIP" ]; then
+            INSTALL_CMD="${INSTALL_CMD}pip3 install $PIP && "
+          fi
+          if [ -n "$NPM" ]; then
+            INSTALL_CMD="${INSTALL_CMD}npm install -g $NPM && "
+          fi
+
+          echo "Pre-install command: ${INSTALL_CMD}"
+
+          # Run with root user to install deps, then switch back for pruva-verify
+          docker run --rm \
+            -e PRUVA_SANDBOX=true \
+            -e PRUVA_API_URL="${API_URL}" \
+            -e REPRO_ID="${{ matrix.repro_id }}" \
+            -e PRUVA_RESULTS_DIR="/tmp/pruva-results" \
+            --user root \
+            pruva-sandbox:test \
+            bash -c "${INSTALL_CMD}su vscode -c 'pruva-verify \"\$REPRO_ID\"'" \
+            2>&1 | tee "/tmp/pruva-${{ matrix.repro_id }}-retry.log" || true
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "::endgroup::"
+
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "✅ ${{ matrix.repro_id }}: PASSED after installing: $APT $PIP $NPM"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "❌ ${{ matrix.repro_id }}: Still FAILED after installing dependencies"
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pruva-log-${{ matrix.repro_id }}
+          path: /tmp/pruva-${{ matrix.repro_id }}*.log
+          retention-days: 30
+
+      - name: Set final result
+        id: final
+        if: always()
+        run: |
+          if [ "${{ steps.verify.outputs.result }}" = "success" ]; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+            echo "needs_deps=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.retry.outputs.result }}" = "success" ]; then
+            echo "status=pass_with_deps" >> "$GITHUB_OUTPUT"
+            echo "needs_deps=true" >> "$GITHUB_OUTPUT"
+            echo "apt=${{ steps.detect-deps.outputs.apt_packages }}" >> "$GITHUB_OUTPUT"
+            echo "pip=${{ steps.detect-deps.outputs.pip_packages }}" >> "$GITHUB_OUTPUT"
+            echo "npm=${{ steps.detect-deps.outputs.npm_packages }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "needs_deps=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Job 4: Collect missing dependencies and open an issue to update Dockerfile
+  collect-missing-deps:
+    runs-on: ubuntu-latest
+    needs: [discover, test-in-container]
+    if: always() && needs.test-in-container.result == 'failure'
+    permissions:
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all log artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/all-logs
+          pattern: pruva-log-*
+
+      - name: Analyze all failures for missing dependencies
+        id: analyze
+        run: |
+          chmod +x scripts/detect-missing-deps.sh
+
+          ALL_APT=""
+          ALL_PIP=""
+          ALL_NPM=""
+          REPORT=""
+
+          for log_dir in /tmp/all-logs/pruva-log-*; do
+            REPRO=$(basename "$log_dir" | sed 's/pruva-log-//')
+            LOG=$(ls "$log_dir"/*.log 2>/dev/null | head -1 || echo "")
+            if [ -z "$LOG" ]; then continue; fi
+
+            DEPS=$(./scripts/detect-missing-deps.sh "$LOG" --json 2>/dev/null || echo '{"total_missing":0}')
+            TOTAL=$(echo "$DEPS" | jq '.total_missing')
+
+            if [ "$TOTAL" -gt 0 ]; then
+              APT=$(echo "$DEPS" | jq -r '.apt_packages[]' 2>/dev/null || true)
+              PIP=$(echo "$DEPS" | jq -r '.pip_packages[]' 2>/dev/null || true)
+              NPM=$(echo "$DEPS" | jq -r '.npm_packages[]' 2>/dev/null || true)
+              ALL_APT="$ALL_APT $APT"
+              ALL_PIP="$ALL_PIP $PIP"
+              ALL_NPM="$ALL_NPM $NPM"
+              REPORT="$REPORT\n- **$REPRO**: apt=[$APT] pip=[$PIP] npm=[$NPM]"
+            fi
+          done
+
+          # Deduplicate
+          ALL_APT=$(echo "$ALL_APT" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          ALL_PIP=$(echo "$ALL_PIP" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          ALL_NPM=$(echo "$ALL_NPM" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+
+          echo "all_apt=$ALL_APT" >> "$GITHUB_OUTPUT"
+          echo "all_pip=$ALL_PIP" >> "$GITHUB_OUTPUT"
+          echo "all_npm=$ALL_NPM" >> "$GITHUB_OUTPUT"
+          echo "report<<REPORTEOF" >> "$GITHUB_OUTPUT"
+          echo -e "$REPORT" >> "$GITHUB_OUTPUT"
+          echo "REPORTEOF" >> "$GITHUB_OUTPUT"
+
+          HAS_DEPS="false"
+          if [ -n "$ALL_APT" ] || [ -n "$ALL_PIP" ] || [ -n "$ALL_NPM" ]; then
+            HAS_DEPS="true"
+          fi
+          echo "has_deps=$HAS_DEPS" >> "$GITHUB_OUTPUT"
+
+      - name: Create issue for missing dependencies
+        if: steps.analyze.outputs.has_deps == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALL_APT: ${{ steps.analyze.outputs.all_apt }}
+          ALL_PIP: ${{ steps.analyze.outputs.all_pip }}
+          ALL_NPM: ${{ steps.analyze.outputs.all_npm }}
+          REPORT: ${{ steps.analyze.outputs.report }}
+        run: |
+          TITLE="[Auto] Missing dependencies detected in Codespace tests"
+
+          # Check if issue already exists
+          EXISTING=$(gh issue list --label "missing-deps" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          BODY="## Missing Dependencies Detected
+
+          The automated Codespace test workflow found reproductions that fail due to missing tools/packages in the Docker image.
+
+          ### Affected Reproductions
+          ${REPORT}
+
+          ### Required Additions to Dockerfile
+
+          "
+          if [ -n "$ALL_APT" ]; then
+            BODY="${BODY}**APT packages:** \`$ALL_APT\`
+          \`\`\`dockerfile
+          RUN apt-get update && apt-get install -y $ALL_APT && apt-get clean && rm -rf /var/lib/apt/lists/*
+          \`\`\`
+
+          "
+          fi
+
+          if [ -n "$ALL_PIP" ]; then
+            BODY="${BODY}**Python packages:** \`$ALL_PIP\`
+          \`\`\`dockerfile
+          RUN pip3 install $ALL_PIP
+          \`\`\`
+
+          "
+          fi
+
+          if [ -n "$ALL_NPM" ]; then
+            BODY="${BODY}**NPM packages:** \`$ALL_NPM\`
+          \`\`\`dockerfile
+          RUN npm install -g $ALL_NPM
+          \`\`\`
+
+          "
+          fi
+
+          BODY="${BODY}### Action Required
+          Add these packages to \`.devcontainer/Dockerfile\` to fix the failing reproductions.
+
+          _This issue was automatically created by the test-codespaces workflow._"
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+            echo "Updated existing issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label "missing-deps"
+            echo "Created new issue"
+          fi
+
+  # Job 5: Summary
+  summary:
+    runs-on: ubuntu-latest
+    needs: [discover, validate-branches, test-in-container, collect-missing-deps]
+    if: always()
+    steps:
+      - name: Generate summary
+        env:
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+          COUNT: ${{ needs.discover.outputs.count }}
+          VALIDATE_RESULT: ${{ needs.validate-branches.result }}
+          CONTAINER_RESULT: ${{ needs.test-in-container.result }}
+        run: |
+          echo "## Codespace Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branches tested | ${COUNT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch validation | ${VALIDATE_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Container tests | ${CONTAINER_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Tested Reproductions" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$MATRIX" | jq -r '.[]' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$CONTAINER_RESULT" = "failure" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "> **Some reproductions failed.** Check individual job logs and the missing-deps issue for details." >> "$GITHUB_STEP_SUMMARY"
+          fi

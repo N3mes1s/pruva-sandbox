@@ -9,12 +9,25 @@ on:
         description: 'Pruva API URL'
         required: false
         default: 'https://pruva-api-production.up.railway.app/v1'
+      run_tests:
+        description: 'Run Codespace tests after creating branches'
+        required: false
+        default: 'true'
+        type: boolean
+      test_count:
+        description: 'Number of latest branches to test'
+        required: false
+        default: '10'
 
 jobs:
   scan-and-create-branches:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      created: ${{ steps.scan.outputs.created }}
+      fixed: ${{ steps.scan.outputs.fixed }}
+      new_repro_ids: ${{ steps.scan.outputs.new_repro_ids }}
 
     steps:
       - name: Checkout repository
@@ -28,6 +41,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Fetch all reproductions and create branches
+        id: scan
         env:
           API_URL: ${{ inputs.api_url }}
         run: |
@@ -48,6 +62,7 @@ jobs:
           CREATED=0
           FIXED=0
           SKIPPED=0
+          NEW_IDS=""
 
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
@@ -79,6 +94,7 @@ jobs:
               git push --force-with-lease origin "$BRANCH"
 
               FIXED=$((FIXED + 1))
+              NEW_IDS="$NEW_IDS $REPRO_ID"
 
               # Return to main
               git checkout main
@@ -102,6 +118,7 @@ jobs:
             git push origin "$BRANCH"
 
             CREATED=$((CREATED + 1))
+            NEW_IDS="$NEW_IDS $REPRO_ID"
 
             # Return to main for next iteration
             git checkout main
@@ -118,3 +135,19 @@ jobs:
           if [ $CREATED -eq 0 ] && [ $FIXED -eq 0 ]; then
             echo "No changes needed - all branches are correctly configured"
           fi
+
+          echo "created=$CREATED" >> "$GITHUB_OUTPUT"
+          echo "fixed=$FIXED" >> "$GITHUB_OUTPUT"
+          echo "new_repro_ids=$(echo $NEW_IDS | xargs)" >> "$GITHUB_OUTPUT"
+
+  # Run Codespace tests on the latest branches after scanning
+  test-codespaces:
+    needs: scan-and-create-branches
+    if: inputs.run_tests != 'false'
+    uses: ./.github/workflows/test-codespaces.yml
+    with:
+      latest_count: ${{ inputs.test_count || '10' }}
+    permissions:
+      contents: read
+      packages: read
+      issues: write
