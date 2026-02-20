@@ -233,6 +233,8 @@ async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -
     app = await modal.App.lookup.aio("pruva-codespace-tests", create_if_missing=True, client=client)
     print("[modal] App ready", flush=True)
 
+    # add_python is required by Modal's sandbox runtime (installs Modal's
+    # internal Python via micromamba; does NOT modify pruva-sandbox tools)
     image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
 
     semaphore = asyncio.Semaphore(max_parallel)
