@@ -233,7 +233,7 @@ async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -
     app = await modal.App.lookup.aio("pruva-codespace-tests", create_if_missing=True, client=client)
     print("[modal] App ready", flush=True)
 
-    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest")
+    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
 
     semaphore = asyncio.Semaphore(max_parallel)
     results = []
