@@ -1,0 +1,22 @@
+--- repro/reproduction_steps.sh	2026-02-20 15:03:00.000000000 +0000
++++ repro/reproduction_steps.sh	2026-02-20 16:30:00.000000000 +0000
+@@ -7,6 +7,19 @@
+ LOGS="$ROOT/logs"
+ mkdir -p "$LOGS"
+ 
++# Install PHP and Composer if not available
++if ! command -v php &> /dev/null; then
++    echo "[*] Installing PHP..."
++    sudo apt-get update -qq && sudo apt-get install -y -qq php-cli php-xml php-mbstring php-curl php-zip php-gd 2>&1 | tail -3
++fi
++
++if ! command -v composer &> /dev/null; then
++    echo "[*] Installing Composer..."
++    php -r "copy('https://getcomposer.org/installer', '/tmp/composer-setup.php');"
++    sudo php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
++    rm -f /tmp/composer-setup.php
++fi
++
+ cd "$ROOT"
+ 
+ echo "=== Formwork GHSA-34p4-7w83-35g2 Privilege Escalation Reproduction ==="

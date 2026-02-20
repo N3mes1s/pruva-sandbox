@@ -1,0 +1,20 @@
+--- repro/reproduction_steps.sh	2026-02-20 15:03:00.000000000 +0000
++++ repro/reproduction_steps.sh	2026-02-20 16:30:00.000000000 +0000
+@@ -7,6 +7,17 @@
+ LOGS="$ROOT/logs"
+ mkdir -p "$LOGS"
+
++# Download vulnerable Deno version if not present
++DENO_BIN_PRE="$ROOT/repro/deno"
++if [[ ! -f "$DENO_BIN_PRE" ]]; then
++    echo "[+] Downloading vulnerable Deno v2.6.7..."
++    ARCH=$(uname -m)
++    [ "$ARCH" = "aarch64" ] && DENO_ARCH="aarch64" || DENO_ARCH="x86_64"
++    curl -fsSL "https://github.com/denoland/deno/releases/download/v2.6.7/deno-${DENO_ARCH}-unknown-linux-gnu.zip" -o /tmp/deno.zip
++    unzip -o /tmp/deno.zip -d "$ROOT/repro/" && chmod +x "$DENO_BIN_PRE"
++    rm -f /tmp/deno.zip
++fi
++
+ # Path to vulnerable Deno binary
+ DENO_BIN="$ROOT/repro/deno"
+
