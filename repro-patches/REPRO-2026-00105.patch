@@ -1,5 +1,5 @@
 --- repro/reproduction_steps.sh	2026-02-20 09:32:33.080148228 +0000
-+++ repro/reproduction_steps.sh	2026-02-20 09:32:41.891148114 +0000
++++ repro/reproduction_steps.sh	2026-02-20 09:49:31.519134160 +0000
 @@ -12,6 +12,22 @@
  echo "CVE: CVE-2026-27013 / GHSA-hfvx-25r5-qc3w"
  echo ""
@@ -12,10 +12,10 @@
 +  echo "[*] Installing dependencies..."
 +  cd "$ROOT/repro/fabric.js"
 +  npm install 2>&1 | tail -5
-+  npm install jsdom 2>&1 | tail -3
 +  echo "[*] Building fabric.js..."
 +  npm run build 2>&1 | tail -5
 +  cd "$ROOT"
++  npm install jsdom 2>&1 | tail -3
 +  echo "[*] Build complete"
 +  echo ""
 +fi
