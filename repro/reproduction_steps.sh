@@ -19,7 +19,8 @@ if [ ! -f "$ROOT/repro/fabric.js/dist/index.node.cjs" ]; then
   git clone --depth 1 --branch v7.1.0 https://github.com/fabricjs/fabric.js.git "$ROOT/repro/fabric.js" 2>&1 | tail -3
   echo "[*] Installing dependencies..."
   cd "$ROOT/repro/fabric.js"
-  npm install --ignore-scripts 2>&1 | tail -5
+  npm install 2>&1 | tail -5
+  npm install jsdom 2>&1 | tail -3
   echo "[*] Building fabric.js..."
   npm run build 2>&1 | tail -5
   cd "$ROOT"
