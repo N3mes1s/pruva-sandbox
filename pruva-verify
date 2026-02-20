@@ -234,6 +234,45 @@ fi
 chmod +x "$SCRIPT_PATH"
 log "Downloaded ${ARTIFACT_COUNT} repro artifact(s), script: $(wc -l < "$SCRIPT_PATH") lines"
 
+# Apply patch if available (fixes known issues in reproduction scripts)
+# Patches are looked up from: 1) local repo, 2) GitHub raw URL
+PATCH_APPLIED=false
+PATCH_LOCATIONS=(
+  # Local repo (Codespace / checked-out repo)
+  "/workspaces/pruva-sandbox/repro-patches/${REPRO_ID}.patch"
+  "${HOME}/pruva-sandbox/repro-patches/${REPRO_ID}.patch"
+  # Relative to script location (if pruva-verify is in the repo)
+  "$(cd "$(dirname "$0")" && pwd)/repro-patches/${REPRO_ID}.patch"
+)
+
+for patch_file in "${PATCH_LOCATIONS[@]}"; do
+  if [[ -f "$patch_file" ]]; then
+    log "Applying patch: ${patch_file}"
+    if patch -p0 --directory="$WORK_DIR" < "$patch_file" 2>/dev/null; then
+      PATCH_APPLIED=true
+      log "Patch applied successfully"
+    else
+      warn "Patch failed to apply (may already be applied)"
+    fi
+    break
+  fi
+done
+
+# Try downloading patch from GitHub if not found locally
+if [[ "$PATCH_APPLIED" == "false" ]]; then
+  PATCH_URL="https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/main/repro-patches/${REPRO_ID}.patch"
+  TEMP_PATCH=$(mktemp)
+  if curl -sf "$PATCH_URL" -o "$TEMP_PATCH" 2>/dev/null && [[ -s "$TEMP_PATCH" ]]; then
+    log "Applying patch from GitHub..."
+    if patch -p0 --directory="$WORK_DIR" < "$TEMP_PATCH" 2>/dev/null; then
+      log "Patch applied successfully"
+    else
+      warn "Patch failed to apply (may already be applied)"
+    fi
+  fi
+  rm -f "$TEMP_PATCH"
+fi
+
 # Make script portable by replacing hardcoded paths
 # Scripts may have BASE_DIR="/root/.pruva/runs/.../bundle" or similar
 # We need to rewrite these to use WORK_DIR instead
