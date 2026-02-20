@@ -1,6 +1,6 @@
---- repro/reproduction_steps.sh	2026-02-20 07:02:47.985274005 +0000
-+++ repro/reproduction_steps.sh	2026-02-20 07:03:44.152273304 +0000
-@@ -12,6 +12,21 @@
+--- repro/reproduction_steps.sh	2026-02-20 09:32:33.080148228 +0000
++++ repro/reproduction_steps.sh	2026-02-20 09:32:41.891148114 +0000
+@@ -12,6 +12,22 @@
  echo "CVE: CVE-2026-27013 / GHSA-hfvx-25r5-qc3w"
  echo ""
  
@@ -9,7 +9,7 @@
 +  echo "[*] Cloning fabric.js v7.1.0 (vulnerable)..."
 +  mkdir -p "$ROOT/repro"
 +  git clone --depth 1 --branch v7.1.0 https://github.com/fabricjs/fabric.js.git "$ROOT/repro/fabric.js" 2>&1 | tail -3
-+  echo "[*] Installing dependencies + jsdom..."
++  echo "[*] Installing dependencies..."
 +  cd "$ROOT/repro/fabric.js"
 +  npm install 2>&1 | tail -5
 +  npm install jsdom 2>&1 | tail -3

@@ -316,8 +316,8 @@ def print_results(results: list[dict]):
                 print("STDERR (last 500 chars):")
                 print(r["stderr"][-500:])
             if r["stdout"]:
-                print("STDOUT (last 500 chars):")
-                print(r["stdout"][-500:])
+                print("STDOUT (last 3000 chars):")
+                print(r["stdout"][-3000:])
             print()
 
     if failed > 0 or errors > 0:
