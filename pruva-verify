@@ -238,6 +238,8 @@ log "Downloaded ${ARTIFACT_COUNT} repro artifact(s), script: $(wc -l < "$SCRIPT_
 # Patches are looked up from: 1) local repo, 2) GitHub raw URL
 PATCH_APPLIED=false
 PATCH_LOCATIONS=(
+  # Injected by Modal test runner
+  "/tmp/repro-patches/${REPRO_ID}.patch"
   # Local repo (Codespace / checked-out repo)
   "/workspaces/pruva-sandbox/repro-patches/${REPRO_ID}.patch"
   "${HOME}/pruva-sandbox/repro-patches/${REPRO_ID}.patch"

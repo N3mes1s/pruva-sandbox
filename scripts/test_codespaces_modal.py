@@ -124,6 +124,29 @@ def _setup_proxy_tunnel():
     print(f"[proxy] Tunnel enabled via {proxy_host}:{proxy_port}", flush=True)
 
 
+# ── Load local pruva-verify for injection into sandbox ──
+
+def _load_local_pruva_verify() -> str:
+    """Read the local pruva-verify script (with artifact download + patch support)."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pv_path = os.path.join(script_dir, "..", "pruva-verify")
+    if os.path.isfile(pv_path):
+        with open(pv_path) as f:
+            return f.read()
+    return ""
+
+_PRUVA_VERIFY_SCRIPT = _load_local_pruva_verify()
+
+def _load_local_patch(repro_id: str) -> str:
+    """Read a local .patch file for a repro ID if it exists."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    patch_path = os.path.join(script_dir, "..", "repro-patches", f"{repro_id}.patch")
+    if os.path.isfile(patch_path):
+        with open(patch_path) as f:
+            return f.read()
+    return ""
+
+
 # ── Core test logic ──
 
 async def run_single_test(client, app, image, repro_id: str) -> dict:
@@ -151,6 +174,23 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
                 "PRUVA_RESULTS_DIR": "/tmp/pruva-results",
             },
         )
+
+        # Inject updated pruva-verify into sandbox (downloads all artifacts + auto-patches)
+        if _PRUVA_VERIFY_SCRIPT:
+            import base64 as _b64
+            encoded = _b64.b64encode(_PRUVA_VERIFY_SCRIPT.encode()).decode()
+            inject = await sb.exec.aio("bash", "-c",
+                f"echo '{encoded}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
+            await inject.wait.aio()
+
+        # Inject patch file if available
+        patch_content = _load_local_patch(repro_id)
+        if patch_content:
+            import base64 as _b64
+            encoded_patch = _b64.b64encode(patch_content.encode()).decode()
+            inject_patch = await sb.exec.aio("bash", "-c",
+                f"mkdir -p /tmp/repro-patches && echo '{encoded_patch}' | base64 -d > /tmp/repro-patches/{repro_id}.patch")
+            await inject_patch.wait.aio()
 
         proc = await sb.exec.aio("bash", "-c", f"pruva-verify {repro_id} 2>&1")
         stdout_lines = []
