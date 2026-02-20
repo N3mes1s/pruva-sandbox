@@ -162,6 +162,16 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
             },
         )
 
+        # Inject latest pruva-verify from local repo (may be newer than Docker image)
+        local_verify = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pruva-verify")
+        if os.path.isfile(local_verify):
+            import base64 as _b64v
+            with open(local_verify) as fv:
+                encoded_verify = _b64v.b64encode(fv.read().encode()).decode()
+            inject_verify = await sb.exec.aio("bash", "-c",
+                f"echo '{encoded_verify}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
+            await inject_verify.wait.aio()
+
         # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
         if patch_content:
@@ -233,6 +243,8 @@ async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -
     app = await modal.App.lookup.aio("pruva-codespace-tests", create_if_missing=True, client=client)
     print("[modal] App ready", flush=True)
 
+    # add_python is required by Modal's sandbox runtime (installs Modal's
+    # internal Python via micromamba; does NOT modify pruva-sandbox tools)
     image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
 
     semaphore = asyncio.Semaphore(max_parallel)
@@ -314,8 +326,8 @@ def print_results(results: list[dict]):
                 print("STDERR (last 500 chars):")
                 print(r["stderr"][-500:])
             if r["stdout"]:
-                print("STDOUT (last 500 chars):")
-                print(r["stdout"][-500:])
+                print("STDOUT (last 3000 chars):")
+                print(r["stdout"][-3000:])
             print()
 
     if failed > 0 or errors > 0:
