@@ -1,0 +1,19 @@
+--- repro/reproduction_steps.sh	2026-02-20 07:02:56.242273902 +0000
++++ repro/reproduction_steps.sh	2026-02-20 07:04:04.741273048 +0000
+@@ -17,7 +17,15 @@
+ VULN_FILE="$WORKSPACE/librenms-vulnerable/includes/html/table/address-search.inc.php"
+ 
+ if [ ! -f "$VULN_FILE" ]; then
+-    echo "ERROR: Vulnerable file not found. Run git clone first."
++    echo "[*] Cloning LibreNMS vulnerable version (24.11.0)..."
++    mkdir -p "$WORKSPACE"
++    git clone --depth 1 --branch 24.11.0 https://github.com/librenms/librenms.git "$WORKSPACE/librenms-vulnerable" 2>&1 | tail -3
++    echo "[*] Clone complete"
++    echo ""
++fi
++
++if [ ! -f "$VULN_FILE" ]; then
++    echo "ERROR: Vulnerable file not found after clone."
+     exit 1
+ fi
+ 
