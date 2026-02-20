@@ -124,19 +124,6 @@ def _setup_proxy_tunnel():
     print(f"[proxy] Tunnel enabled via {proxy_host}:{proxy_port}", flush=True)
 
 
-# ── Load local pruva-verify for injection into sandbox ──
-
-def _load_local_pruva_verify() -> str:
-    """Read the local pruva-verify script (with artifact download + patch support)."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    pv_path = os.path.join(script_dir, "..", "pruva-verify")
-    if os.path.isfile(pv_path):
-        with open(pv_path) as f:
-            return f.read()
-    return ""
-
-_PRUVA_VERIFY_SCRIPT = _load_local_pruva_verify()
-
 def _load_local_patch(repro_id: str) -> str:
     """Read a local .patch file for a repro ID if it exists."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -175,15 +162,7 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
             },
         )
 
-        # Inject updated pruva-verify into sandbox (downloads all artifacts + auto-patches)
-        if _PRUVA_VERIFY_SCRIPT:
-            import base64 as _b64
-            encoded = _b64.b64encode(_PRUVA_VERIFY_SCRIPT.encode()).decode()
-            inject = await sb.exec.aio("bash", "-c",
-                f"echo '{encoded}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
-            await inject.wait.aio()
-
-        # Inject patch file if available
+        # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
         if patch_content:
             import base64 as _b64
@@ -254,7 +233,7 @@ async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -
     app = await modal.App.lookup.aio("pruva-codespace-tests", create_if_missing=True, client=client)
     print("[modal] App ready", flush=True)
 
-    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
+    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest")
 
     semaphore = asyncio.Semaphore(max_parallel)
     results = []
