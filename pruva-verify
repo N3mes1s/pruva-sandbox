@@ -208,23 +208,31 @@ fi
 
 log "Found script artifact: ${SCRIPT_ARTIFACT}"
 
-# Create directory structure and download
-SCRIPT_DIR=$(dirname "$SCRIPT_ARTIFACT")
-if [[ "$SCRIPT_DIR" != "." ]]; then
-  mkdir -p "${WORK_DIR}/${SCRIPT_DIR}"
-fi
-SCRIPT_PATH="${WORK_DIR}/${SCRIPT_ARTIFACT}"
-SCRIPT_URL="${API_URL}/reproductions/${REPRO_ID}/artifacts/${SCRIPT_ARTIFACT}"
+# Download all repro/ artifacts (scripts may depend on companion files like mock servers)
+REPRO_ARTIFACTS=$(echo "$METADATA" | jq -r '[.artifacts[] | select(.path | startswith("repro/"))] | .[].path')
+ARTIFACT_COUNT=0
 
-log "Downloading reproduction script..."
-if ! curl -sf "$SCRIPT_URL" -o "$SCRIPT_PATH" 2>/dev/null; then
+for artifact_path in $REPRO_ARTIFACTS; do
+  artifact_dir=$(dirname "$artifact_path")
+  mkdir -p "${WORK_DIR}/${artifact_dir}"
+  artifact_url="${API_URL}/reproductions/${REPRO_ID}/artifacts/${artifact_path}"
+  if curl -sf "$artifact_url" -o "${WORK_DIR}/${artifact_path}" 2>/dev/null; then
+    ARTIFACT_COUNT=$((ARTIFACT_COUNT + 1))
+    # Make scripts executable
+    if [[ "$artifact_path" == *.sh ]] || [[ "$artifact_path" == *.py ]]; then
+      chmod +x "${WORK_DIR}/${artifact_path}"
+    fi
+  fi
+done
+
+SCRIPT_PATH="${WORK_DIR}/${SCRIPT_ARTIFACT}"
+if [[ ! -f "$SCRIPT_PATH" ]]; then
   error "Failed to download reproduction script"
-  error "URL: ${SCRIPT_URL}"
   exit 1
 fi
 
 chmod +x "$SCRIPT_PATH"
-log "Script downloaded: $(wc -l < "$SCRIPT_PATH") lines"
+log "Downloaded ${ARTIFACT_COUNT} repro artifact(s), script: $(wc -l < "$SCRIPT_PATH") lines"
 
 # Make script portable by replacing hardcoded paths
 # Scripts may have BASE_DIR="/root/.pruva/runs/.../bundle" or similar
