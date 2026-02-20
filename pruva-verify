@@ -208,22 +208,51 @@ fi
 
 log "Found script artifact: ${SCRIPT_ARTIFACT}"
 
-# Download all repro/ artifacts (scripts may depend on companion files like mock servers)
-REPRO_ARTIFACTS=$(echo "$METADATA" | jq -r '[.artifacts[] | select(.path | startswith("repro/"))] | .[].path')
+# Download reproduction artifacts
+# Older repros may have artifacts under bundle/repro/, bundle/, or at root level.
+# We normalize paths: strip leading "bundle/" prefix so scripts land under WORK_DIR
+# in a consistent layout, and download any artifacts that are the script itself,
+# under repro/, or under bundle/repro/.
+
+# Determine the script's directory prefix to know which companion files to grab
+SCRIPT_DIR_PREFIX=$(dirname "$SCRIPT_ARTIFACT")
+[[ "$SCRIPT_DIR_PREFIX" == "." ]] && SCRIPT_DIR_PREFIX=""
+
+# Build list of artifacts to download: script + companions in the same tree + repro/ subtree
+DOWNLOAD_ARTIFACTS=$(echo "$METADATA" | jq -r --arg script "$SCRIPT_ARTIFACT" --arg prefix "$SCRIPT_DIR_PREFIX" '
+  [.artifacts[] | select(
+    .path == $script or
+    (.path | startswith("repro/")) or
+    (.path | startswith("bundle/repro/")) or
+    ($prefix != "" and (.path | startswith($prefix + "/")))
+  )] | .[].path
+')
+
 ARTIFACT_COUNT=0
 
-for artifact_path in $REPRO_ARTIFACTS; do
-  artifact_dir=$(dirname "$artifact_path")
-  mkdir -p "${WORK_DIR}/${artifact_dir}"
+for artifact_path in $DOWNLOAD_ARTIFACTS; do
+  # Normalize: strip leading "bundle/" so files land correctly in WORK_DIR
+  local_path="$artifact_path"
+  if [[ "$local_path" == bundle/* ]]; then
+    local_path="${local_path#bundle/}"
+  fi
+
+  local_dir=$(dirname "$local_path")
+  mkdir -p "${WORK_DIR}/${local_dir}"
   artifact_url="${API_URL}/reproductions/${REPRO_ID}/artifacts/${artifact_path}"
-  if curl -sf "$artifact_url" -o "${WORK_DIR}/${artifact_path}" 2>/dev/null; then
+  if curl -sf "$artifact_url" -o "${WORK_DIR}/${local_path}" 2>/dev/null; then
     ARTIFACT_COUNT=$((ARTIFACT_COUNT + 1))
     # Make scripts executable
-    if [[ "$artifact_path" == *.sh ]] || [[ "$artifact_path" == *.py ]]; then
-      chmod +x "${WORK_DIR}/${artifact_path}"
+    if [[ "$local_path" == *.sh ]] || [[ "$local_path" == *.py ]]; then
+      chmod +x "${WORK_DIR}/${local_path}"
     fi
   fi
 done
+
+# Normalize SCRIPT_ARTIFACT to match local path (strip bundle/ prefix)
+if [[ "$SCRIPT_ARTIFACT" == bundle/* ]]; then
+  SCRIPT_ARTIFACT="${SCRIPT_ARTIFACT#bundle/}"
+fi
 
 SCRIPT_PATH="${WORK_DIR}/${SCRIPT_ARTIFACT}"
 if [[ ! -f "$SCRIPT_PATH" ]]; then

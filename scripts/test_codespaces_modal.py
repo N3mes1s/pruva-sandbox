@@ -162,6 +162,16 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
             },
         )
 
+        # Inject latest pruva-verify from local repo (may be newer than Docker image)
+        local_verify = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pruva-verify")
+        if os.path.isfile(local_verify):
+            import base64 as _b64v
+            with open(local_verify) as fv:
+                encoded_verify = _b64v.b64encode(fv.read().encode()).decode()
+            inject_verify = await sb.exec.aio("bash", "-c",
+                f"echo '{encoded_verify}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
+            await inject_verify.wait.aio()
+
         # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
         if patch_content:
