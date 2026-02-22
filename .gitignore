@@ -7,3 +7,6 @@ pruva-results/
 # Python
 __pycache__/
 *.pyc
+
+# Rust
+pruva-verify-rs/target/

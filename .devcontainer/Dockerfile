@@ -46,9 +46,18 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # Install patch tool (for auto-applying reproduction script fixes)
 RUN apt-get update && apt-get install -y patch && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install pruva-verify (always fetch latest from GitHub main branch)
-RUN curl -fsSL https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/main/pruva-verify \
-    -o /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify
+# Install pruva-verify Rust binary from GitHub releases
+# Falls back to the bash script if no release binary is available yet
+ARG TARGETARCH
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
+    if curl -fsSL "https://github.com/N3mes1s/pruva-sandbox/releases/latest/download/pruva-verify-${ARCH}-unknown-linux-gnu" \
+       -o /usr/local/bin/pruva-verify 2>/dev/null; then \
+      chmod +x /usr/local/bin/pruva-verify; \
+    else \
+      echo "No release binary found, falling back to bash script"; \
+      curl -fsSL https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/main/pruva-verify \
+        -o /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify; \
+    fi
 
 # Create environment manifest for version tracking
 RUN echo "PRUVA_SANDBOX_VERSION=${BUILD_DATE}" > /etc/pruva-sandbox-version && \
