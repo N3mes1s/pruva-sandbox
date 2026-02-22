@@ -124,4 +124,34 @@ mod tests {
             assert!(!map.is_empty());
         }
     }
+
+    #[test]
+    fn results_dir_returns_non_empty_string() {
+        let dir = results_dir();
+        assert!(!dir.is_empty());
+    }
+
+    #[test]
+    fn is_sandbox_returns_bool() {
+        // Just verify the function can be called and returns a value
+        let _ = is_sandbox();
+    }
+
+    #[test]
+    fn is_interactive_returns_bool() {
+        // In test context stdin is not a tty, should return false
+        let result = is_interactive();
+        // We can't assert a specific value as it depends on the test runner
+        let _ = result;
+    }
+
+    #[test]
+    fn parse_sandbox_version_content() {
+        // Test the parsing logic by verifying the function handles
+        // the file format correctly. We can't write to /etc in tests,
+        // but we can verify the function signature and behavior.
+        let result = load_sandbox_version();
+        // In a non-sandbox env this is None - that's fine
+        assert!(result.is_none() || !result.as_ref().unwrap().is_empty());
+    }
 }

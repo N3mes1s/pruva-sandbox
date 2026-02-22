@@ -227,4 +227,79 @@ mod tests {
         let path = prepare_script(dir.path(), "bundle/deep/exploit.sh").unwrap();
         assert_eq!(path, f);
     }
+
+    #[test]
+    fn count_lines_multiline_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("multi.sh");
+        fs::write(&f, "line1\nline2\nline3\nline4\nline5\n").unwrap();
+        assert_eq!(count_lines(&f), 5);
+    }
+
+    #[test]
+    fn count_lines_windows_newlines() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("win.sh");
+        fs::write(&f, "line1\r\nline2\r\nline3\r\n").unwrap();
+        // Rust's lines() splits on \n, \r\n counts as single line separator
+        assert_eq!(count_lines(&f), 3);
+    }
+
+    #[test]
+    fn make_executable_full_permission_preservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("script.sh");
+        fs::write(&f, "#!/bin/bash").unwrap();
+        // Set permissions to 0o444 (read-only)
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o444)).unwrap();
+        make_executable(&f).unwrap();
+        let mode = fs::metadata(&f).unwrap().permissions().mode();
+        // Should now have read+exec for all
+        assert!(mode & 0o444 != 0, "Read bits should be preserved");
+        assert!(mode & 0o111 != 0, "Execute bits should be set");
+    }
+
+    #[test]
+    fn prepare_script_returns_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("exploit.sh");
+        fs::write(&f, "#!/bin/bash\nexit 0").unwrap();
+
+        let path = prepare_script(dir.path(), "exploit.sh").unwrap();
+        assert!(path.is_absolute(), "Should return absolute path");
+    }
+
+    #[test]
+    fn prepare_script_with_root_level_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("run.py");
+        fs::write(&f, "#!/usr/bin/env python3\nprint('hi')").unwrap();
+
+        let path = prepare_script(dir.path(), "run.py").unwrap();
+        assert_eq!(path, f);
+        let mode = fs::metadata(&f).unwrap().permissions().mode();
+        assert!(mode & 0o111 != 0, "Should be executable");
+    }
+
+    #[test]
+    fn prepare_script_with_deeply_nested_path() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("a/b/c")).unwrap();
+        let f = dir.path().join("a/b/c/exploit.sh");
+        fs::write(&f, "#!/bin/bash").unwrap();
+
+        let path = prepare_script(dir.path(), "bundle/a/b/c/exploit.sh").unwrap();
+        assert_eq!(path, f);
+    }
+
+    #[test]
+    fn count_lines_binary_like_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("binary_like.sh");
+        // Content with null bytes
+        fs::write(&f, "#!/bin/bash\n\0\necho hi\n").unwrap();
+        // Should still count lines without panic
+        let lines = count_lines(&f);
+        assert!(lines > 0);
+    }
 }

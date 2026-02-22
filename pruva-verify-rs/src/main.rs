@@ -35,8 +35,8 @@ fn main() {
 }
 
 fn run(input: &str) -> Result<()> {
-    let api_url =
-        std::env::var("PRUVA_API_URL").unwrap_or_else(|_| "https://pruva-api-production.up.railway.app/v1".to_string());
+    let api_url = std::env::var("PRUVA_API_URL")
+        .unwrap_or_else(|_| "https://pruva-api-production.up.railway.app/v1".to_string());
     let keep_dir = std::env::var("PRUVA_KEEP_DIR").unwrap_or_else(|_| "1".to_string());
 
     let client = reqwest::blocking::Client::builder()
@@ -170,5 +170,74 @@ impl Drop for CleanupGuard {
         } else if self.work_dir.exists() {
             let _ = fs::remove_dir_all(&self.work_dir);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_guard_removes_dir_when_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let work_dir = dir.path().join("test-cleanup");
+        fs::create_dir_all(&work_dir).unwrap();
+        assert!(work_dir.exists());
+
+        {
+            let _guard = CleanupGuard {
+                work_dir: work_dir.clone(),
+                keep: false,
+            };
+            // guard dropped here
+        }
+        assert!(!work_dir.exists(), "Directory should be removed on drop");
+    }
+
+    #[test]
+    fn cleanup_guard_keeps_dir_when_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let work_dir = dir.path().join("test-keep");
+        fs::create_dir_all(&work_dir).unwrap();
+        assert!(work_dir.exists());
+
+        {
+            let _guard = CleanupGuard {
+                work_dir: work_dir.clone(),
+                keep: true,
+            };
+        }
+        assert!(work_dir.exists(), "Directory should be kept when keep=true");
+    }
+
+    #[test]
+    fn cleanup_guard_no_panic_on_nonexistent_dir() {
+        {
+            let _guard = CleanupGuard {
+                work_dir: PathBuf::from("/tmp/nonexistent-pruva-guard-test-xyz"),
+                keep: false,
+            };
+        }
+        // Should not panic
+    }
+
+    #[test]
+    fn cleanup_guard_removes_nested_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let work_dir = dir.path().join("nested-cleanup");
+        let nested = work_dir.join("subdir/deep");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("file.txt"), "content").unwrap();
+
+        {
+            let _guard = CleanupGuard {
+                work_dir: work_dir.clone(),
+                keep: false,
+            };
+        }
+        assert!(
+            !work_dir.exists(),
+            "Entire directory tree should be removed"
+        );
     }
 }

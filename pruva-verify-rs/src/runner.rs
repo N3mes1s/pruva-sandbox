@@ -73,7 +73,7 @@ pub fn report_success(work_dir: &Path, duration: u64) {
 
 /// Print a failure report.
 pub fn report_failure(work_dir: &Path, exit_code: i32, duration: u64) {
-    display::error(&format!("=========================================="));
+    display::error("==========================================");
     display::error(&format!("  VERIFICATION FAILED (exit code: {exit_code})"));
     display::error(&format!("  Duration: {duration}s"));
     display::error("==========================================");
@@ -185,5 +185,132 @@ mod tests {
     #[test]
     fn list_dir_files_no_panic_on_nonexistent() {
         list_dir_files(Path::new("/tmp/nonexistent-pruva-test-dir-xyz"));
+    }
+
+    #[test]
+    fn list_dir_files_lists_sorted_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("charlie.log"), "c").unwrap();
+        fs::write(dir.path().join("alpha.log"), "a").unwrap();
+        fs::write(dir.path().join("bravo.log"), "b").unwrap();
+        // Just verify it doesn't panic with populated directory
+        list_dir_files(dir.path());
+    }
+
+    #[test]
+    fn run_script_captures_correct_exit_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("exit7.sh");
+        fs::write(&script, "#!/bin/bash\nexit 7\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = run_script(&script, dir.path()).unwrap();
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 7);
+    }
+
+    #[test]
+    fn run_script_exit_code_127_command_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("bad_cmd.sh");
+        fs::write(&script, "#!/bin/bash\nnonexistent_command_xyz_123\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = run_script(&script, dir.path()).unwrap();
+        assert!(!result.success);
+        assert_eq!(result.exit_code, 127);
+    }
+
+    #[test]
+    fn run_script_uses_work_dir_as_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("created_by_script.txt");
+        let script = dir.path().join("cwd_test.sh");
+        fs::write(
+            &script,
+            "#!/bin/bash\npwd > created_by_script.txt\nexit 0\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = run_script(&script, dir.path()).unwrap();
+        assert!(result.success);
+        assert!(
+            marker.exists(),
+            "Script should write to its working directory"
+        );
+        let content = fs::read_to_string(&marker).unwrap();
+        assert!(content
+            .trim()
+            .ends_with(dir.path().file_name().unwrap().to_str().unwrap()));
+    }
+
+    #[test]
+    fn report_success_no_panic_without_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        // No logs directory - should not panic
+        report_success(dir.path(), 42);
+    }
+
+    #[test]
+    fn report_success_no_panic_with_result_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(logs_dir.join("result.json"), r#"{"status":"pass"}"#).unwrap();
+        report_success(dir.path(), 10);
+    }
+
+    #[test]
+    fn report_success_with_empty_result_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(logs_dir.join("result.json"), "").unwrap();
+        report_success(dir.path(), 5);
+    }
+
+    #[test]
+    fn report_failure_no_panic_without_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        report_failure(dir.path(), 1, 10);
+    }
+
+    #[test]
+    fn report_failure_with_repro_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        // Write more than 20 lines to test tail behavior
+        let content: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        fs::write(logs_dir.join("repro.log"), &content).unwrap();
+        report_failure(dir.path(), 42, 100);
+    }
+
+    #[test]
+    fn report_failure_with_short_repro_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(logs_dir.join("repro.log"), "only one line\n").unwrap();
+        report_failure(dir.path(), 1, 3);
+    }
+
+    #[test]
+    fn show_logs_summary_with_multiple_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(logs_dir.join("install.log"), "installed").unwrap();
+        fs::write(logs_dir.join("repro.log"), "repro output").unwrap();
+        fs::write(logs_dir.join("result.json"), "{}").unwrap();
+        show_logs_summary(dir.path());
+    }
+
+    #[test]
+    fn show_logs_summary_no_logs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // No logs directory at all
+        show_logs_summary(dir.path());
     }
 }

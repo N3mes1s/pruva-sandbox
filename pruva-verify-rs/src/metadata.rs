@@ -30,6 +30,7 @@ pub struct ReproMetadata {
     #[serde(default)]
     pub cve_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub status: Option<String>,
     #[serde(default)]
     pub reproduction_script: Option<String>,
@@ -116,7 +117,7 @@ pub fn artifacts_to_download(meta: &ReproMetadata, script_path: &str) -> Vec<Str
                 || a.path.starts_with("bundle/repro/")
                 || script_dir
                     .as_ref()
-                    .map_or(false, |prefix| a.path.starts_with(prefix))
+                    .is_some_and(|prefix| a.path.starts_with(prefix))
         })
         .map(|a| a.path.clone())
         .collect()
@@ -464,5 +465,194 @@ mod tests {
     fn normalize_bundle_without_slash() {
         // "bundle" alone (no trailing slash) should not be stripped
         assert_eq!(normalize_artifact_path("bundle"), "bundle");
+    }
+
+    // --- deserialization edge cases ---
+
+    #[test]
+    fn deserialize_minimal_metadata() {
+        let json = r#"{}"#;
+        let meta: ReproMetadata = serde_json::from_str(json).unwrap();
+        assert!(meta.title.is_none());
+        assert!(meta.severity.is_none());
+        assert!(meta.ghsa_id.is_none());
+        assert!(meta.cve_id.is_none());
+        assert!(meta.reproduction_script.is_none());
+        assert!(meta.artifacts.is_empty());
+    }
+
+    #[test]
+    fn deserialize_full_metadata() {
+        let json = r#"{
+            "title": "Test Vuln",
+            "severity": "critical",
+            "ghsa_id": "GHSA-xxxx-xxxx-xxxx",
+            "cve_id": "CVE-2025-0001",
+            "status": "published",
+            "reproduction_script": "repro/exploit.sh",
+            "artifacts": [
+                {"path": "repro/exploit.sh", "category": "reproduction_script", "size": 1024}
+            ],
+            "environment": {"sandbox_version": "1.0.0"}
+        }"#;
+        let meta: ReproMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("Test Vuln"));
+        assert_eq!(meta.severity.as_deref(), Some("critical"));
+        assert_eq!(
+            meta.reproduction_script.as_deref(),
+            Some("repro/exploit.sh")
+        );
+        assert_eq!(meta.artifacts.len(), 1);
+        assert_eq!(meta.artifacts[0].size, 1024);
+        assert_eq!(meta.environment.sandbox_version.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn deserialize_unknown_fields_are_ignored() {
+        let json = r#"{
+            "title": "Test",
+            "unknown_field": "should be ignored",
+            "another_unknown": 42
+        }"#;
+        // serde by default ignores unknown fields with deny_unknown_fields off
+        let meta: ReproMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("Test"));
+    }
+
+    #[test]
+    fn deserialize_artifact_with_defaults() {
+        let json = r#"{"path": "repro/exploit.sh"}"#;
+        let artifact: Artifact = serde_json::from_str(json).unwrap();
+        assert_eq!(artifact.path, "repro/exploit.sh");
+        assert_eq!(artifact.category, ""); // default
+        assert_eq!(artifact.size, 0); // default
+    }
+
+    #[test]
+    fn deserialize_null_fields_as_none() {
+        let json = r#"{"title": null, "severity": null}"#;
+        let meta: ReproMetadata = serde_json::from_str(json).unwrap();
+        assert!(meta.title.is_none());
+        assert!(meta.severity.is_none());
+    }
+
+    // --- more select_script_artifact edge cases ---
+
+    #[test]
+    fn select_script_all_artifacts_wrong_category() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("repro/exploit.sh", "log", 100),
+            make_artifact("repro/helper.py", "companion", 200),
+            make_artifact("other/run.sh", "other", 300),
+        ];
+        assert!(select_script_artifact(&meta).is_err());
+    }
+
+    #[test]
+    fn select_script_prefers_repro_prefix_over_larger_non_repro() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("custom/huge.sh", "reproduction_script", 99999),
+            make_artifact("repro/small.sh", "reproduction_script", 10),
+        ];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "repro/small.sh");
+    }
+
+    #[test]
+    fn select_script_whitespace_reproduction_script_field() {
+        let mut meta = base_metadata();
+        meta.reproduction_script = Some("  repro/exploit.sh  ".into());
+        // Non-empty string, so it should be used as-is (no trimming)
+        assert_eq!(
+            select_script_artifact(&meta).unwrap(),
+            "  repro/exploit.sh  "
+        );
+    }
+
+    // --- more artifacts_to_download edge cases ---
+
+    #[test]
+    fn download_bundle_repro_included_for_any_script_location() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("other/exploit.sh", "reproduction_script", 100),
+            make_artifact("bundle/repro/config.json", "config", 50),
+            make_artifact("bundle/logs/output.log", "log", 200),
+        ];
+        let result = artifacts_to_download(&meta, "other/exploit.sh");
+        assert!(result.contains(&"other/exploit.sh".to_string()));
+        assert!(result.contains(&"bundle/repro/config.json".to_string()));
+        assert!(!result.contains(&"bundle/logs/output.log".to_string()));
+    }
+
+    #[test]
+    fn download_all_repro_files_regardless_of_category() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("repro/exploit.sh", "reproduction_script", 100),
+            make_artifact("repro/readme.md", "analysis", 50),
+            make_artifact("repro/data.json", "other", 200),
+        ];
+        let result = artifacts_to_download(&meta, "repro/exploit.sh");
+        assert_eq!(result.len(), 3, "All repro/ files should be included");
+    }
+
+    #[test]
+    fn download_script_dir_does_not_match_partial_dir_names() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("scripts/exploit.sh", "reproduction_script", 100),
+            make_artifact("scripts-extra/helper.py", "companion", 200),
+        ];
+        let result = artifacts_to_download(&meta, "scripts/exploit.sh");
+        assert!(result.contains(&"scripts/exploit.sh".to_string()));
+        // "scripts/" prefix should NOT match "scripts-extra/"
+        assert!(!result.contains(&"scripts-extra/helper.py".to_string()));
+    }
+
+    // --- normalize edge cases ---
+
+    #[test]
+    fn normalize_preserves_path_with_bundle_in_middle() {
+        // "repro/bundle/exploit.sh" should NOT be stripped
+        assert_eq!(
+            normalize_artifact_path("repro/bundle/exploit.sh"),
+            "repro/bundle/exploit.sh"
+        );
+    }
+
+    #[test]
+    fn normalize_path_with_dots() {
+        assert_eq!(
+            normalize_artifact_path("bundle/../exploit.sh"),
+            "../exploit.sh"
+        );
+    }
+
+    // --- ReproMetadata clone and debug ---
+
+    #[test]
+    fn repro_metadata_clone() {
+        let meta = base_metadata();
+        let cloned = meta.clone();
+        assert_eq!(format!("{:?}", meta), format!("{:?}", cloned));
+    }
+
+    #[test]
+    fn artifact_clone_and_debug() {
+        let a = make_artifact("repro/exploit.sh", "reproduction_script", 42);
+        let b = a.clone();
+        assert_eq!(a.path, b.path);
+        assert_eq!(a.category, b.category);
+        assert_eq!(a.size, b.size);
+        let debug = format!("{:?}", a);
+        assert!(debug.contains("exploit.sh"));
+    }
+
+    #[test]
+    fn environment_default() {
+        let env = Environment::default();
+        assert!(env.sandbox_version.is_none());
     }
 }

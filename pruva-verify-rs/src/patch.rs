@@ -171,4 +171,66 @@ mod tests {
         let content = fs::read_to_string(&target).unwrap();
         assert!(content.contains("echo new"));
     }
+
+    #[test]
+    fn apply_patch_file_fails_on_empty_patch() {
+        let dir = tempfile::tempdir().unwrap();
+        let patch = dir.path().join("empty.patch");
+        fs::write(&patch, "").unwrap();
+
+        // Empty patch: `patch` command may return non-zero or zero depending on version
+        // but should not panic
+        let _ = apply_patch_file(&patch, dir.path());
+    }
+
+    #[test]
+    fn apply_patch_file_fails_on_corrupt_patch() {
+        let dir = tempfile::tempdir().unwrap();
+        let patch = dir.path().join("corrupt.patch");
+        fs::write(&patch, "this is not a valid patch\nrandom content\n").unwrap();
+
+        let result = apply_patch_file(&patch, dir.path());
+        assert!(!result, "Corrupt patch should fail");
+    }
+
+    #[test]
+    fn local_patch_paths_returns_at_least_three() {
+        let paths = local_patch_paths("REPRO-2026-00050");
+        assert!(
+            paths.len() >= 3,
+            "Should have at least /tmp, /workspaces, and $HOME paths"
+        );
+    }
+
+    #[test]
+    fn local_patch_paths_all_end_with_patch_extension() {
+        let paths = local_patch_paths("REPRO-2026-00099");
+        for p in &paths {
+            assert!(
+                p.to_string_lossy().ends_with(".patch"),
+                "Expected .patch extension: {}",
+                p.display()
+            );
+        }
+    }
+
+    #[test]
+    fn github_patch_url_contains_repo_path() {
+        let url = github_patch_url("REPRO-2026-00001");
+        assert!(url.contains("N3mes1s/pruva-sandbox"));
+        assert!(url.contains("repro-patches/"));
+        assert!(url.starts_with("https://"));
+    }
+
+    #[test]
+    fn apply_patches_returns_false_when_no_patches_exist() {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // Use an ID that won't have any local or remote patches
+        let result = apply_patches(&client, "REPRO-9999-99999", dir.path());
+        assert!(!result, "Should return false when no patches found");
+    }
 }

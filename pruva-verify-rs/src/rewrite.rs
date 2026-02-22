@@ -123,4 +123,81 @@ mod tests {
             "All occurrences should be replaced"
         );
     }
+
+    #[test]
+    fn rewrite_fails_on_nonexistent_file() {
+        let work = tempfile::tempdir().unwrap();
+        let result = rewrite_base_dir(Path::new("/tmp/nonexistent-pruva-xyz.sh"), work.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rewrite_multiple_base_dir_declarations() {
+        // If there are multiple BASE_DIR= lines, the regex captures the first match
+        // and replaces ALL occurrences of that value
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("multi.sh");
+        fs::write(
+            &script,
+            "#!/bin/bash\nBASE_DIR=\"/first/path\"\nBASE_DIR=\"/first/path\"\ncd /first/path\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let work = tempfile::tempdir().unwrap();
+        let result = rewrite_base_dir(&script, work.path()).unwrap();
+        assert_eq!(result, Some("/first/path".into()));
+        let content = fs::read_to_string(&script).unwrap();
+        assert!(!content.contains("/first/path"));
+    }
+
+    #[test]
+    fn rewrite_base_dir_with_spaces_in_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("spaces.sh");
+        fs::write(
+            &script,
+            "#!/bin/bash\nBASE_DIR=\"/path with spaces/bundle\"\ncd \"$BASE_DIR\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let work = tempfile::tempdir().unwrap();
+        let result = rewrite_base_dir(&script, work.path()).unwrap();
+        assert_eq!(result, Some("/path with spaces/bundle".into()));
+    }
+
+    #[test]
+    fn rewrite_base_dir_with_special_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("special.sh");
+        // Path contains characters that are special in regex: . + $ etc.
+        fs::write(
+            &script,
+            "#!/bin/bash\nBASE_DIR=\"/tmp/pruva.v1+test$dir\"\ncd /tmp/pruva.v1+test$dir\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let work = tempfile::tempdir().unwrap();
+        let result = rewrite_base_dir(&script, work.path()).unwrap();
+        // The function uses string replace, not regex replace, so special chars are fine
+        assert_eq!(result, Some("/tmp/pruva.v1+test$dir".into()));
+        let content = fs::read_to_string(&script).unwrap();
+        assert!(!content.contains("/tmp/pruva.v1+test$dir"));
+    }
+
+    #[test]
+    fn rewrite_single_quote_base_dir_not_matched() {
+        // Single quotes around BASE_DIR should NOT be matched by the regex
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("single_q.sh");
+        let original = "#!/bin/bash\nBASE_DIR='/old/path'\ncd /old/path\n";
+        fs::write(&script, original).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let work = tempfile::tempdir().unwrap();
+        let result = rewrite_base_dir(&script, work.path()).unwrap();
+        assert!(result.is_none(), "Single-quoted BASE_DIR should not match");
+    }
 }

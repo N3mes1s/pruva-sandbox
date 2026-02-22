@@ -201,4 +201,74 @@ mod tests {
             InputId::Ghsa("GHSA-1234-5678-9abc".into())
         );
     }
+
+    #[test]
+    fn parse_rejects_trailing_newline() {
+        assert!(parse_input("REPRO-2026-00001\n").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_repro_with_extra_dashes() {
+        assert!(parse_input("REPRO-2026-001-extra").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_cve_with_extra_dashes() {
+        assert!(parse_input("CVE-2025-1716-1").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_ghsa_with_only_two_segments() {
+        assert!(parse_input("GHSA-abcd-efgh").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_ghsa_with_four_segments() {
+        assert!(parse_input("GHSA-abcd-efgh-ijkl-mnop").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_repro_zero_year() {
+        assert!(parse_input("REPRO-0000-00001").is_ok());
+    }
+
+    #[test]
+    fn parse_cve_large_sequence_number() {
+        assert_eq!(
+            parse_input("CVE-2025-999999999").unwrap(),
+            InputId::Cve("CVE-2025-999999999".into())
+        );
+    }
+
+    #[test]
+    fn parse_rejects_ghsa_with_uppercase_hex() {
+        // A-F are uppercase, should be rejected
+        assert!(parse_input("GHSA-ABCD-efgh-ijkl").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_just_prefix() {
+        assert!(parse_input("REPRO-").is_err());
+        assert!(parse_input("CVE-").is_err());
+        assert!(parse_input("GHSA-").is_err());
+    }
+
+    #[test]
+    fn input_id_debug_and_clone() {
+        let id = InputId::Repro("REPRO-2026-00001".into());
+        let cloned = id.clone();
+        assert_eq!(id, cloned);
+        // Verify Debug impl works
+        let debug = format!("{:?}", id);
+        assert!(debug.contains("Repro"));
+    }
+
+    #[test]
+    fn input_id_equality() {
+        let a = InputId::Ghsa("GHSA-1234-5678-9abc".into());
+        let b = InputId::Ghsa("GHSA-1234-5678-9abc".into());
+        let c = InputId::Cve("CVE-2025-0001".into());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
 }

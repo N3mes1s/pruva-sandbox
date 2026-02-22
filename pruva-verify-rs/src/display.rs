@@ -97,4 +97,52 @@ mod tests {
     fn print_warning_does_not_panic() {
         print_warning();
     }
+
+    #[test]
+    fn log_empty_message() {
+        log("");
+    }
+
+    #[test]
+    fn error_empty_message() {
+        error("");
+    }
+
+    #[test]
+    fn log_with_special_characters() {
+        log("test <script>alert('xss')</script> & \"quotes\" \\ backslash");
+    }
+
+    #[test]
+    fn print_banner_empty_strings() {
+        print_banner("", "", "", None, None);
+    }
+
+    #[test]
+    fn print_banner_only_ghsa() {
+        print_banner(
+            "REPRO-2026-00001",
+            "Test",
+            "HIGH",
+            Some("GHSA-xxxx-xxxx-xxxx"),
+            None,
+        );
+    }
+
+    #[test]
+    fn print_banner_only_cve() {
+        print_banner(
+            "REPRO-2026-00001",
+            "Test",
+            "HIGH",
+            None,
+            Some("CVE-2025-0001"),
+        );
+    }
+
+    #[test]
+    fn print_banner_long_title() {
+        let long_title = "A".repeat(500);
+        print_banner("REPRO-2026-00001", &long_title, "CRITICAL", None, None);
+    }
 }
