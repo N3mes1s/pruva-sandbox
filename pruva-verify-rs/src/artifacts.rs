@@ -165,4 +165,66 @@ mod tests {
         let path = prepare_script(dir.path(), "bundle/repro/exploit.sh").unwrap();
         assert_eq!(path, f);
     }
+
+    // --- additional edge cases ---
+
+    #[test]
+    fn count_lines_single_line_no_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("one.txt");
+        fs::write(&f, "single line").unwrap();
+        assert_eq!(count_lines(&f), 1);
+    }
+
+    #[test]
+    fn count_lines_only_newlines() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("newlines.txt");
+        fs::write(&f, "\n\n\n").unwrap();
+        assert_eq!(count_lines(&f), 3);
+    }
+
+    #[test]
+    fn make_executable_preserves_existing_bits() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("script.sh");
+        fs::write(&f, "#!/bin/bash").unwrap();
+        // Set read+write for owner, nothing else
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o600)).unwrap();
+        make_executable(&f).unwrap();
+        let mode = fs::metadata(&f).unwrap().permissions().mode();
+        // Original rw- bits should still be present
+        assert!(mode & 0o600 != 0, "Read/write bits should be preserved");
+        assert!(mode & 0o111 != 0, "Execute bits should be set");
+    }
+
+    #[test]
+    fn make_executable_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("script.sh");
+        fs::write(&f, "#!/bin/bash").unwrap();
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+        // Already executable - should not error
+        make_executable(&f).unwrap();
+        let mode = fs::metadata(&f).unwrap().permissions().mode();
+        assert!(mode & 0o111 != 0);
+    }
+
+    #[test]
+    fn make_executable_fails_on_nonexistent() {
+        let result = make_executable(Path::new("/tmp/nonexistent-pruva-chmod-xyz"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn prepare_script_normalizes_nested_bundle_path() {
+        let dir = tempfile::tempdir().unwrap();
+        // bundle/deep/exploit.sh → deep/exploit.sh after normalization
+        fs::create_dir_all(dir.path().join("deep")).unwrap();
+        let f = dir.path().join("deep/exploit.sh");
+        fs::write(&f, "#!/bin/bash").unwrap();
+
+        let path = prepare_script(dir.path(), "bundle/deep/exploit.sh").unwrap();
+        assert_eq!(path, f);
+    }
 }

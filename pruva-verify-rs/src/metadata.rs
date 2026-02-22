@@ -297,4 +297,172 @@ mod tests {
         let result = artifacts_to_download(&meta, "exploit.sh");
         assert_eq!(result, vec!["exploit.sh"]);
     }
+
+    // --- additional select_script_artifact edge cases ---
+
+    #[test]
+    fn select_script_reproduction_script_field_takes_priority_over_repro_prefix() {
+        // reproduction_script field should win even when a repro/-prefixed artifact exists
+        let mut meta = base_metadata();
+        meta.reproduction_script = Some("custom/path.sh".into());
+        meta.artifacts = vec![make_artifact("repro/run.sh", "reproduction_script", 100)];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "custom/path.sh");
+    }
+
+    #[test]
+    fn select_script_none_reproduction_script_field() {
+        // None (as opposed to Some("")) should fall through to artifact scan
+        let mut meta = base_metadata();
+        meta.reproduction_script = None;
+        meta.artifacts = vec![make_artifact("repro/run.py", "reproduction_script", 50)];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "repro/run.py");
+    }
+
+    #[test]
+    fn select_script_multiple_repro_prefix_picks_first() {
+        // When multiple artifacts start with repro/, the first one wins
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("repro/first.sh", "reproduction_script", 100),
+            make_artifact("repro/second.sh", "reproduction_script", 200),
+        ];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "repro/first.sh");
+    }
+
+    #[test]
+    fn select_script_largest_among_ties() {
+        // When no repro/ prefix exists and two have same size, max_by_key picks last
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("a.sh", "reproduction_script", 500),
+            make_artifact("b.sh", "reproduction_script", 500),
+        ];
+        // max_by_key with equal keys returns the last element
+        let result = select_script_artifact(&meta).unwrap();
+        assert_eq!(result, "b.sh");
+    }
+
+    #[test]
+    fn select_script_single_artifact() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![make_artifact("only.sh", "reproduction_script", 42)];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "only.sh");
+    }
+
+    #[test]
+    fn select_script_mixed_categories_only_uses_reproduction_script() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("repro/log.txt", "log", 9999),
+            make_artifact("repro/config.json", "config", 8888),
+            make_artifact("exploit.py", "reproduction_script", 10),
+        ];
+        assert_eq!(select_script_artifact(&meta).unwrap(), "exploit.py");
+    }
+
+    // --- additional artifacts_to_download edge cases ---
+
+    #[test]
+    fn download_excludes_unrelated_directories() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("scripts/exploit.sh", "reproduction_script", 100),
+            make_artifact("logs/output.txt", "log", 200),
+            make_artifact("data/payload.bin", "payload", 300),
+        ];
+        let result = artifacts_to_download(&meta, "scripts/exploit.sh");
+        assert!(result.contains(&"scripts/exploit.sh".to_string()));
+        assert!(!result.contains(&"logs/output.txt".to_string()));
+        assert!(!result.contains(&"data/payload.bin".to_string()));
+    }
+
+    #[test]
+    fn download_repro_prefix_included_even_for_non_repro_script() {
+        // Anything under repro/ is always included regardless of script location
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("custom/exploit.sh", "reproduction_script", 100),
+            make_artifact("repro/helper.py", "companion", 200),
+            make_artifact("bundle/repro/data.json", "data", 300),
+        ];
+        let result = artifacts_to_download(&meta, "custom/exploit.sh");
+        assert!(result.contains(&"custom/exploit.sh".to_string()));
+        assert!(result.contains(&"repro/helper.py".to_string()));
+        assert!(result.contains(&"bundle/repro/data.json".to_string()));
+    }
+
+    #[test]
+    fn download_root_script_does_not_match_root_level_siblings() {
+        // Root-level script should NOT pull in other root-level files as companions
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("exploit.sh", "reproduction_script", 100),
+            make_artifact("helper.py", "companion", 200),
+            make_artifact("readme.txt", "docs", 50),
+        ];
+        let result = artifacts_to_download(&meta, "exploit.sh");
+        // Only exact match, no companion matching for root-level scripts
+        assert_eq!(result, vec!["exploit.sh"]);
+    }
+
+    #[test]
+    fn download_nested_script_includes_nested_companions() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("deep/nested/exploit.sh", "reproduction_script", 100),
+            make_artifact("deep/nested/payload.bin", "companion", 200),
+            make_artifact("deep/other.txt", "docs", 50),
+        ];
+        let result = artifacts_to_download(&meta, "deep/nested/exploit.sh");
+        assert!(result.contains(&"deep/nested/exploit.sh".to_string()));
+        assert!(result.contains(&"deep/nested/payload.bin".to_string()));
+        assert!(!result.contains(&"deep/other.txt".to_string()));
+    }
+
+    #[test]
+    fn download_empty_artifacts_returns_empty() {
+        let meta = base_metadata();
+        let result = artifacts_to_download(&meta, "repro/exploit.sh");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn download_script_path_not_in_artifacts_still_matches_repro() {
+        // Script path is not present as an artifact, but repro/ artifacts are included
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact("repro/helper.py", "companion", 200),
+            make_artifact("unrelated/foo.txt", "log", 50),
+        ];
+        let result = artifacts_to_download(&meta, "missing/exploit.sh");
+        assert!(result.contains(&"repro/helper.py".to_string()));
+        assert!(!result.contains(&"unrelated/foo.txt".to_string()));
+    }
+
+    // --- additional normalize_artifact_path edge cases ---
+
+    #[test]
+    fn normalize_double_bundle_prefix() {
+        // Only strips the first bundle/ prefix
+        assert_eq!(
+            normalize_artifact_path("bundle/bundle/exploit.sh"),
+            "bundle/exploit.sh"
+        );
+    }
+
+    #[test]
+    fn normalize_empty_path() {
+        assert_eq!(normalize_artifact_path(""), "");
+    }
+
+    #[test]
+    fn normalize_just_bundle_slash() {
+        assert_eq!(normalize_artifact_path("bundle/"), "");
+    }
+
+    #[test]
+    fn normalize_bundle_without_slash() {
+        // "bundle" alone (no trailing slash) should not be stripped
+        assert_eq!(normalize_artifact_path("bundle"), "bundle");
+    }
 }

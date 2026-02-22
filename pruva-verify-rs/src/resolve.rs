@@ -140,4 +140,65 @@ mod tests {
         let result = resolve_repro_id(&client, "http://localhost:0", &id).unwrap();
         assert_eq!(result, "REPRO-2026-00001");
     }
+
+    // --- additional parse_input edge cases ---
+
+    #[test]
+    fn parse_repro_single_digit_sequence() {
+        assert_eq!(
+            parse_input("REPRO-2026-1").unwrap(),
+            InputId::Repro("REPRO-2026-1".into())
+        );
+    }
+
+    #[test]
+    fn parse_cve_single_digit() {
+        assert_eq!(
+            parse_input("CVE-2025-1").unwrap(),
+            InputId::Cve("CVE-2025-1".into())
+        );
+    }
+
+    #[test]
+    fn parse_ghsa_rejects_too_short_segment() {
+        assert!(parse_input("GHSA-abc-defg-hijk").is_err());
+    }
+
+    #[test]
+    fn parse_ghsa_rejects_too_long_segment() {
+        assert!(parse_input("GHSA-abcde-fghi-jklm").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_lowercase_repro() {
+        assert!(parse_input("repro-2026-00001").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_lowercase_cve() {
+        assert!(parse_input("cve-2025-1716").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_whitespace_padding() {
+        assert!(parse_input(" REPRO-2026-00001 ").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_repro_with_letters_in_sequence() {
+        assert!(parse_input("REPRO-2026-abc").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_cve_missing_year() {
+        assert!(parse_input("CVE--1716").is_err());
+    }
+
+    #[test]
+    fn parse_ghsa_allows_digits_in_segments() {
+        assert_eq!(
+            parse_input("GHSA-1234-5678-9abc").unwrap(),
+            InputId::Ghsa("GHSA-1234-5678-9abc".into())
+        );
+    }
 }
