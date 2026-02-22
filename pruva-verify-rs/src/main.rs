@@ -36,7 +36,7 @@ fn main() {
 
 fn run(input: &str) -> Result<()> {
     let api_url =
-        std::env::var("PRUVA_API_URL").unwrap_or_else(|_| "https://api.pruva.dev/v1".to_string());
+        std::env::var("PRUVA_API_URL").unwrap_or_else(|_| "https://pruva-api-production.up.railway.app/v1".to_string());
     let keep_dir = std::env::var("PRUVA_KEEP_DIR").unwrap_or_else(|_| "1".to_string());
 
     let client = reqwest::blocking::Client::builder()
