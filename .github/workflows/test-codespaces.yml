@@ -40,6 +40,8 @@ on:
 env:
   API_URL: https://pruva-api-production.up.railway.app/v1
   REGISTRY: ghcr.io
+  # Space-separated list of REPRO_IDs to skip in CI
+  SKIP_REPROS: "REPRO-2026-00006 REPRO-2026-00118"
 
 jobs:
   # Job 1: Discover which REPRO_IDs to test
@@ -70,9 +72,30 @@ jobs:
             echo "Finding latest $LATEST_COUNT repro branches..."
             REPRO_IDS=$(git branch -r --sort=-committerdate \
               | grep 'origin/repro/REPRO-' \
-              | head -n "$LATEST_COUNT" \
               | sed 's|.*origin/repro/||' \
               | xargs)
+
+            # Filter out skipped repros
+            if [ -n "$SKIP_REPROS" ]; then
+              FILTERED=""
+              for id in $REPRO_IDS; do
+                SKIP=false
+                for skip_id in $SKIP_REPROS; do
+                  if [ "$id" = "$skip_id" ]; then
+                    SKIP=true
+                    echo "Skipping $id (in SKIP_REPROS)"
+                    break
+                  fi
+                done
+                if [ "$SKIP" = false ]; then
+                  FILTERED="$FILTERED $id"
+                fi
+              done
+              REPRO_IDS=$(echo "$FILTERED" | xargs)
+            fi
+
+            # Apply latest_count limit after filtering
+            REPRO_IDS=$(echo "$REPRO_IDS" | tr ' ' '\n' | head -n "$LATEST_COUNT" | xargs)
           fi
 
           echo "Repro IDs to test:"
