@@ -1,0 +1,17 @@
+--- repro/reproduction_steps.sh	2026-04-04 00:00:00.000000000 +0000
++++ repro/reproduction_steps.sh	2026-04-04 00:00:00.000000000 +0000
+@@ -17,6 +17,12 @@
+ echo "[1/4] Installing Python dependencies..."
+ pip install -q msgpack requests retry 2>/dev/null || true
+
++# Clone vulnerable pymetasploit3 source if not present
++if [ ! -d "$PYMSF_DIR" ]; then
++  echo "[*] Cloning pymetasploit3 v1.0.6..."
++  pip download pymetasploit3==1.0.6 --no-binary :all: --no-deps -d /tmp/pymsf-src 2>&1 | tail -3
++  tar xzf /tmp/pymsf-src/pymetasploit3-1.0.6.tar.gz -C "$(dirname "$PYMSF_DIR")"
++  mv "$(dirname "$PYMSF_DIR")/pymetasploit3-1.0.6" "$PYMSF_DIR"
++fi
++
+ # Install vulnerable pymetasploit3 from local source
+ echo "[2/4] Installing vulnerable pymetasploit3 v1.0.6..."
+ cd "$PYMSF_DIR"
