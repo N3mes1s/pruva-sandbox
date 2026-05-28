@@ -81,8 +81,11 @@ pub fn select_script_artifact(meta: &ReproMetadata) -> Result<String> {
         bail!("No reproduction script found in metadata");
     }
 
-    // 2. Prefer one under repro/
-    if let Some(a) = repro_scripts.iter().find(|a| a.path.starts_with("repro/")) {
+    // 2. Prefer one under repro/ after bundle/ normalization.
+    if let Some(a) = repro_scripts
+        .iter()
+        .find(|a| normalize_artifact_path(&a.path).starts_with("repro/"))
+    {
         return Ok(a.path.clone());
     }
 
@@ -557,6 +560,27 @@ mod tests {
             make_artifact("repro/small.sh", "reproduction_script", 10),
         ];
         assert_eq!(select_script_artifact(&meta).unwrap(), "repro/small.sh");
+    }
+
+    #[test]
+    fn select_script_prefers_normalized_bundle_repro_prefix() {
+        let mut meta = base_metadata();
+        meta.artifacts = vec![
+            make_artifact(
+                "bundle/vuln_variant/reproduction_steps.sh",
+                "reproduction_script",
+                99999,
+            ),
+            make_artifact(
+                "bundle/repro/reproduction_steps.sh",
+                "reproduction_script",
+                10,
+            ),
+        ];
+        assert_eq!(
+            select_script_artifact(&meta).unwrap(),
+            "bundle/repro/reproduction_steps.sh"
+        );
     }
 
     #[test]

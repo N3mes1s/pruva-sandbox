@@ -1,0 +1,16 @@
+--- repro/reproduction_steps.sh	2026-05-28 00:00:00.000000000 +0000
++++ repro/reproduction_steps.sh	2026-05-28 00:00:00.000000000 +0000
+@@ -8,6 +8,13 @@
+ 
+ cd "$ROOT"
+ 
++# Install Go when the base sandbox lacks it.
++if ! command -v go >/dev/null 2>&1; then
++    echo "[*] Installing Go toolchain..."
++    apt-get update -qq
++    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go
++fi
++
+ REPO_DIR="$ROOT/external/goshs"
+ VULN_BIN="$REPO_DIR/goshs_v2.0.1"
+ FIXED_BIN="$REPO_DIR/goshs_v2.0.2"
