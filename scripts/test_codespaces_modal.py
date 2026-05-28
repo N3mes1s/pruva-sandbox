@@ -134,6 +134,14 @@ def _load_local_patch(repro_id: str) -> str:
     return ""
 
 
+async def _write_sandbox_file(sb, path: str, data: bytes | str, mode: str):
+    """Write a file into a Modal sandbox without passing content through argv."""
+    if "b" in mode:
+        await sb.filesystem.write_bytes.aio(data, path)
+    else:
+        await sb.filesystem.write_text.aio(data, path)
+
+
 # ── Core test logic ──
 
 async def run_single_test(client, app, image, repro_id: str) -> dict:
@@ -170,19 +178,16 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
         local_verify = rust_verify if os.path.isfile(rust_verify) else bash_verify
         if os.path.isfile(local_verify):
             with open(local_verify, "rb") as fv:
-                encoded_verify = base64.b64encode(fv.read()).decode()
-            inject_verify = await sb.exec.aio("bash", "-c",
-                f"echo '{encoded_verify}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
+                await _write_sandbox_file(sb, "/usr/local/bin/pruva-verify", fv.read(), "wb")
+            inject_verify = await sb.exec.aio("chmod", "+x", "/usr/local/bin/pruva-verify")
             await inject_verify.wait.aio()
 
         # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
         if patch_content:
-            import base64 as _b64
-            encoded_patch = _b64.b64encode(patch_content.encode()).decode()
-            inject_patch = await sb.exec.aio("bash", "-c",
-                f"mkdir -p /tmp/repro-patches && echo '{encoded_patch}' | base64 -d > /tmp/repro-patches/{repro_id}.patch")
-            await inject_patch.wait.aio()
+            mkdir_patch = await sb.exec.aio("mkdir", "-p", "/tmp/repro-patches")
+            await mkdir_patch.wait.aio()
+            await _write_sandbox_file(sb, f"/tmp/repro-patches/{repro_id}.patch", patch_content, "w")
 
         proc = await sb.exec.aio("bash", "-c", f"pruva-verify {repro_id} 2>&1")
         stdout_lines = []
