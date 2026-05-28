@@ -162,12 +162,15 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
             },
         )
 
-        # Inject latest pruva-verify from local repo (may be newer than Docker image)
-        local_verify = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pruva-verify")
+        # Inject latest pruva-verify from local repo (may be newer than Docker image).
+        # Prefer the Rust binary built from this branch; fall back to the legacy bash script.
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        rust_verify = os.path.join(repo_root, "pruva-verify-rs", "target", "release", "pruva-verify")
+        bash_verify = os.path.join(repo_root, "pruva-verify")
+        local_verify = rust_verify if os.path.isfile(rust_verify) else bash_verify
         if os.path.isfile(local_verify):
-            import base64 as _b64v
-            with open(local_verify) as fv:
-                encoded_verify = _b64v.b64encode(fv.read().encode()).decode()
+            with open(local_verify, "rb") as fv:
+                encoded_verify = base64.b64encode(fv.read()).decode()
             inject_verify = await sb.exec.aio("bash", "-c",
                 f"echo '{encoded_verify}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
             await inject_verify.wait.aio()
@@ -225,15 +228,24 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
 
 async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -> list[dict]:
     """Run multiple tests in parallel using Modal sandboxes."""
-    import modal
-
     os.environ["MODAL_SERVER_URL"] = "https://api.modal.com"
 
     token_id = os.environ.get("MODAL_TOKEN_ID", "")
     token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
+    missing_setup = []
     if not token_id or not token_secret:
-        print("[error] MODAL_TOKEN_ID and MODAL_TOKEN_SECRET must be set", flush=True)
+        missing_setup.append("MODAL_TOKEN_ID and MODAL_TOKEN_SECRET must be set")
+
+    import importlib.util
+    if importlib.util.find_spec("modal") is None:
+        missing_setup.append("Python package 'modal' is not installed; run: pip install modal")
+
+    if missing_setup:
+        for item in missing_setup:
+            print(f"[error] {item}", flush=True)
         sys.exit(1)
+
+    import modal
 
     print("[modal] Connecting client...", flush=True)
     client = await modal.Client.from_credentials.aio(token_id, token_secret)
