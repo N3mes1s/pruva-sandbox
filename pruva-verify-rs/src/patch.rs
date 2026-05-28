@@ -57,8 +57,18 @@ fn apply_patch_file(patch_path: &Path, work_dir: &Path) -> bool {
 /// Try applying patches from local paths, then from GitHub.
 /// Returns `true` if any patch was applied.
 pub fn apply_patches(client: &reqwest::blocking::Client, repro_id: &str, work_dir: &Path) -> bool {
-    // 1. Try local paths
-    for patch_path in local_patch_paths(repro_id) {
+    let local_paths = local_patch_paths(repro_id);
+    let url = github_patch_url(repro_id);
+    apply_patches_from_sources(client, local_paths, &url, work_dir)
+}
+
+fn apply_patches_from_sources(
+    client: &reqwest::blocking::Client,
+    local_paths: Vec<PathBuf>,
+    github_url: &str,
+    work_dir: &Path,
+) -> bool {
+    for patch_path in local_paths {
         if patch_path.exists() {
             display::log(&format!("Applying patch: {}", patch_path.display()));
             if apply_patch_file(&patch_path, work_dir) {
@@ -67,14 +77,10 @@ pub fn apply_patches(client: &reqwest::blocking::Client, repro_id: &str, work_di
             } else {
                 display::warn("Patch failed to apply (may already be applied)");
             }
-            // Only try the first existing local patch
-            return false;
         }
     }
 
-    // 2. Try GitHub
-    let url = github_patch_url(repro_id);
-    if let Ok(resp) = client.get(&url).send() {
+    if let Ok(resp) = client.get(github_url).send() {
         if resp.status().is_success() {
             if let Ok(bytes) = resp.bytes() {
                 if !bytes.is_empty() {
@@ -101,6 +107,27 @@ pub fn apply_patches(client: &reqwest::blocking::Client, repro_id: &str, work_di
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn serve_patch_once(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let body = body.to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (format!("http://{addr}/patch.diff"), handle)
+    }
 
     #[test]
     fn local_patch_paths_contains_tmp() {
@@ -229,8 +256,47 @@ mod tests {
             .build()
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
-        // Use an ID that won't have any local or remote patches
-        let result = apply_patches(&client, "REPRO-9999-99999", dir.path());
+        let (url, handle) = serve_patch_once("404 Not Found", "");
+
+        let result = apply_patches_from_sources(&client, Vec::new(), &url, dir.path());
+        handle.join().unwrap();
+
         assert!(!result, "Should return false when no patches found");
+    }
+
+    #[test]
+    fn apply_patches_falls_back_to_github_after_local_failure() {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+
+        let target = dir.path().join("exploit.sh");
+        fs::write(&target, "#!/bin/bash\necho old\n").unwrap();
+
+        let corrupt_local_patch = dir.path().join("bad.patch");
+        fs::write(&corrupt_local_patch, "not a valid patch\n").unwrap();
+
+        let remote_patch = "\
+--- exploit.sh.orig
++++ exploit.sh
+@@ -1,2 +1,2 @@
+ #!/bin/bash
+-echo old
++echo new
+";
+        let (url, handle) = serve_patch_once("200 OK", remote_patch);
+
+        let result =
+            apply_patches_from_sources(&client, vec![corrupt_local_patch], &url, dir.path());
+        handle.join().unwrap();
+
+        assert!(
+            result,
+            "Remote patch should be attempted after local failure"
+        );
+        let content = fs::read_to_string(&target).unwrap();
+        assert!(content.contains("echo new"));
     }
 }

@@ -28,13 +28,16 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(e) = run(&cli.id) {
-        display::error(&format!("{e:#}"));
-        process::exit(1);
+    match run(&cli.id) {
+        Ok(code) => process::exit(code),
+        Err(e) => {
+            display::error(&format!("{e:#}"));
+            process::exit(1);
+        }
     }
 }
 
-fn run(input: &str) -> Result<()> {
+fn run(input: &str) -> Result<i32> {
     let api_url = std::env::var("PRUVA_API_URL")
         .unwrap_or_else(|_| "https://pruva-api-production.up.railway.app/v1".to_string());
     let keep_dir = std::env::var("PRUVA_KEEP_DIR").unwrap_or_else(|_| "1".to_string());
@@ -137,7 +140,7 @@ fn run(input: &str) -> Result<()> {
     display::print_warning();
     if !env::confirm_execution() {
         display::log("Aborted.");
-        return Ok(());
+        return Ok(0);
     }
 
     // --- Run ---
@@ -147,10 +150,10 @@ fn run(input: &str) -> Result<()> {
 
     if result.success {
         runner::report_success(&work_dir, result.duration_secs);
-        Ok(())
+        Ok(0)
     } else {
         runner::report_failure(&work_dir, result.exit_code, result.duration_secs);
-        process::exit(1);
+        Ok(1)
     }
 }
 
