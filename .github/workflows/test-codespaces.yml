@@ -4,6 +4,10 @@ on:
   # Can be triggered manually
   workflow_dispatch:
     inputs:
+      api_url:
+        description: 'Pruva API URL'
+        required: false
+        default: 'https://api.pruva.dev/v1'
       latest_count:
         description: 'Number of latest published reproductions to test'
         required: false
@@ -16,10 +20,28 @@ on:
         description: 'Timeout per reproduction (minutes)'
         required: false
         default: '30'
+      container_smoke:
+        description: 'Run optional raw-container smoke tests. This does not apply devcontainer Codespaces features.'
+        required: false
+        default: false
+        type: boolean
+      codespaces_mode:
+        description: 'Run real GitHub Codespaces tests. Requires CODESPACES_PAT secret.'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - available
+          - verify
 
   # Can be called from other workflows (e.g. scan-new-repros)
   workflow_call:
     inputs:
+      api_url:
+        type: string
+        required: false
+        default: 'https://api.pruva.dev/v1'
       latest_count:
         type: string
         required: false
@@ -32,13 +54,24 @@ on:
         type: string
         required: false
         default: '30'
+      container_smoke:
+        type: boolean
+        required: false
+        default: false
+      codespaces_mode:
+        type: string
+        required: false
+        default: 'none'
+    secrets:
+      CODESPACES_PAT:
+        required: false
 
   # Weekly schedule
   schedule:
     - cron: '0 6 * * 1'
 
 env:
-  API_URL: https://api.pruva.dev/v1
+  API_URL: ${{ inputs.api_url || 'https://api.pruva.dev/v1' }}
   REGISTRY: ghcr.io
   # Space-separated list of REPRO_IDs to skip in CI
   SKIP_REPROS: "REPRO-2026-00006 REPRO-2026-00118"
@@ -136,15 +169,26 @@ jobs:
         run: git fetch --all
 
       - name: Run branch validation
+        env:
+          LATEST_COUNT: ${{ inputs.latest_count || '10' }}
+          SPECIFIC_REPRO: ${{ inputs.specific_repro || '' }}
         run: |
           chmod +x scripts/test-codespaces.sh
-          ./scripts/test-codespaces.sh --latest ${{ inputs.latest_count || '10' }} --api-url "$API_URL"
+          if [ -n "$SPECIFIC_REPRO" ]; then
+            ./scripts/test-codespaces.sh --branch "origin/repro/$SPECIFIC_REPRO" --api-url "$API_URL"
+          else
+            ./scripts/test-codespaces.sh --latest "$LATEST_COUNT" --api-url "$API_URL"
+          fi
 
-  # Job 3: Full Docker-based test (runs pruva-verify inside the container)
+  # Job 3: Optional raw-container smoke test.
+  #
+  # This verifies the image can run pruva-verify directly. It is not the real
+  # Codespaces path because GitHub Actions does not apply devcontainer features
+  # such as docker-outside-of-docker and sshd to this plain docker run.
   test-in-container:
     runs-on: ubuntu-latest
     needs: discover
-    if: needs.discover.outputs.count != '0'
+    if: needs.discover.outputs.count != '0' && inputs.container_smoke == true
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -166,6 +210,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute GHCR image repository
+        id: image
+        run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Build test image
         uses: docker/build-push-action@v5
         with:
@@ -174,7 +222,7 @@ jobs:
           push: false
           load: true
           tags: pruva-sandbox:test
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ steps.image.outputs.repo }}:latest
 
       - name: Run pruva-verify for ${{ matrix.repro_id }}
         id: verify
@@ -182,7 +230,8 @@ jobs:
         run: |
           echo "::group::Running pruva-verify ${{ matrix.repro_id }}"
 
-          # Run pruva-verify inside the container, mimicking Codespace startup
+          # Run pruva-verify inside the base image only. The real Codespaces
+          # path is covered by the real-codespaces job when enabled.
           docker run --rm \
             -e PRUVA_SANDBOX=true \
             -e PRUVA_API_URL="${API_URL}" \
@@ -320,7 +369,49 @@ jobs:
             exit 1
           fi
 
-  # Job 4: Collect missing dependencies and open an issue to update Dockerfile
+  # Job 4: Optional real GitHub Codespaces execution.
+  real-codespaces:
+    runs-on: ubuntu-latest
+    needs: discover
+    if: needs.discover.outputs.count != '0' && (inputs.codespaces_mode == 'available' || inputs.codespaces_mode == 'verify')
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '30') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Codespaces configuration
+        env:
+          CODESPACES_MODE: ${{ inputs.codespaces_mode || 'none' }}
+          CODESPACES_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: |
+          case "$CODESPACES_MODE" in
+            available|verify) ;;
+            *)
+              echo "::error::Invalid codespaces_mode '$CODESPACES_MODE'. Use none, available, or verify."
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$CODESPACES_TOKEN" ]; then
+            echo "::error::codespaces_mode=$CODESPACES_MODE requires a CODESPACES_PAT repository secret with the GitHub Codespaces scope."
+            exit 1
+          fi
+
+      - name: Run real Codespaces test
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+          LATEST_COUNT: ${{ inputs.latest_count || '10' }}
+          SPECIFIC_REPRO: ${{ inputs.specific_repro || '' }}
+          CODESPACES_MODE: ${{ inputs.codespaces_mode || 'none' }}
+        run: |
+          chmod +x scripts/test-codespaces-gh.sh
+          if [ -n "$SPECIFIC_REPRO" ]; then
+            ./scripts/test-codespaces-gh.sh --repro-id "$SPECIFIC_REPRO" --api-url "$API_URL" --mode "$CODESPACES_MODE"
+          else
+            ./scripts/test-codespaces-gh.sh --latest "$LATEST_COUNT" --api-url "$API_URL" --mode "$CODESPACES_MODE"
+          fi
+
+  # Job 5: Collect missing dependencies and open an issue to update Dockerfile
   collect-missing-deps:
     runs-on: ubuntu-latest
     needs: [discover, test-in-container]
@@ -448,10 +539,10 @@ jobs:
             echo "Created new issue"
           fi
 
-  # Job 5: Summary
+  # Job 6: Summary
   summary:
     runs-on: ubuntu-latest
-    needs: [discover, validate-branches, test-in-container, collect-missing-deps]
+    needs: [discover, validate-branches, test-in-container, real-codespaces, collect-missing-deps]
     if: always()
     steps:
       - name: Generate summary
@@ -460,6 +551,7 @@ jobs:
           COUNT: ${{ needs.discover.outputs.count }}
           VALIDATE_RESULT: ${{ needs.validate-branches.result }}
           CONTAINER_RESULT: ${{ needs.test-in-container.result }}
+          CODESPACES_RESULT: ${{ needs.real-codespaces.result }}
         run: |
           echo "## Codespace Test Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -467,7 +559,8 @@ jobs:
           echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Branches tested | ${COUNT} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Branch validation | ${VALIDATE_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Container tests | ${CONTAINER_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Raw-container smoke | ${CONTAINER_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Real Codespaces | ${CODESPACES_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tested Reproductions" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -476,5 +569,10 @@ jobs:
 
           if [ "$CONTAINER_RESULT" = "failure" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "> **Some reproductions failed.** Check individual job logs and the missing-deps issue for details." >> "$GITHUB_STEP_SUMMARY"
+            echo "> **Raw-container smoke failed.** This does not apply devcontainer Codespaces features. Check individual job logs and the missing-deps issue for details." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "$CODESPACES_RESULT" = "skipped" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "> **Real Codespaces was skipped.** Re-run with codespaces_mode=available or codespaces_mode=verify and configure CODESPACES_PAT to exercise the web UI path." >> "$GITHUB_STEP_SUMMARY"
           fi

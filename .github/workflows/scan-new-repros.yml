@@ -166,6 +166,7 @@ jobs:
     if: ${{ inputs.run_tests }}
     uses: ./.github/workflows/test-codespaces.yml
     with:
+      api_url: ${{ inputs.api_url }}
       latest_count: ${{ inputs.test_count || '10' }}
     permissions:
       contents: read

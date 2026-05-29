@@ -106,7 +106,7 @@ pruva-verify CVE-2025-1716
     ├── rust-ci.yml             # Rust tests, fmt, clippy on PRs
     ├── release-binary.yml      # Cross-compile + GitHub Release on tags
     ├── build-devcontainer.yml  # Docker image build and push to GHCR
-    ├── test-codespaces.yml     # E2E reproduction testing in containers
+    ├── test-codespaces.yml     # Branch, optional container, and real Codespaces checks
     └── scan-new-repros.yml     # Discover and test new reproductions
 ```
 
@@ -132,6 +132,14 @@ The test suite covers input validation, artifact path normalization, script sele
 
 # Full Codespaces execution check through gh's SSH transport.
 ./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185 --mode verify
+
+# Optional raw-container smoke test in CI. This does not apply devcontainer
+# features such as docker-outside-of-docker or sshd.
+gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
+
+# Real Codespaces test in CI. Configure a CODESPACES_PAT repository secret with
+# Codespaces scope first.
+gh workflow run test-codespaces.yml -f latest_count=20 -f codespaces_mode=verify
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 python3 scripts/test_codespaces_modal.py --latest 5

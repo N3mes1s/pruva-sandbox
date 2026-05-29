@@ -59,6 +59,11 @@ declare -A CMD_TO_APT=(
   [openssl]="openssl"
   [curl]="curl"
   [wget]="wget"
+  [autoconf]="autoconf"
+  [autoreconf]="autoconf"
+  [aclocal]="automake"
+  [automake]="automake"
+  [libtoolize]="libtool"
   [xmllint]="libxml2-utils"
   [xsltproc]="xsltproc"
   [ffmpeg]="ffmpeg"
@@ -67,6 +72,8 @@ declare -A CMD_TO_APT=(
   [pip]="python3-pip"
   [pip3]="python3-pip"
   [virtualenv]="python3-venv"
+  [composer]="composer"
+  [phpize]="php-dev"
 )
 
 # Known Python module -> pip package
@@ -105,25 +112,49 @@ APT_PACKAGES=()
 PIP_PACKAGES=()
 NPM_PACKAGES=()
 MISSING_COMMANDS=()
+DIAGNOSTICS=()
+
+add_missing_command() {
+  local cmd="$1"
+  [[ -z "$cmd" ]] && return
+  MISSING_COMMANDS+=("$cmd")
+  if [[ -n "${CMD_TO_APT[$cmd]:-}" ]]; then
+    APT_PACKAGES+=("${CMD_TO_APT[$cmd]}")
+  fi
+}
+
+add_diagnostic() {
+  local diagnostic="$1"
+  [[ -z "$diagnostic" ]] && return
+  DIAGNOSTICS+=("$diagnostic")
+}
 
 # Pattern: "command not found"
 while IFS= read -r line; do
   # bash: foo: command not found
   cmd=$(echo "$line" | grep -oP '(?<=: )\S+(?=: command not found)' || true)
   if [[ -n "$cmd" ]]; then
-    MISSING_COMMANDS+=("$cmd")
-    if [[ -n "${CMD_TO_APT[$cmd]:-}" ]]; then
-      APT_PACKAGES+=("${CMD_TO_APT[$cmd]}")
+    add_missing_command "$cmd"
+  fi
+
+  # foo: command not found
+  cmd=$(echo "$line" | grep -oP '^[[:alnum:]_.+-]+(?=: command not found)' || true)
+  if [[ -n "$cmd" ]]; then
+    add_missing_command "$cmd"
+  fi
+
+  # sh: 1: foo: not found / ERROR: foo not found
+  if [[ "$line" != *"command not found" ]]; then
+    cmd=$(echo "$line" | grep -oP '(?<=: )[[:alnum:]_.+-]+(?=:? not found$)' || true)
+    if [[ -n "$cmd" ]]; then
+      add_missing_command "$cmd"
     fi
   fi
 
   # /usr/bin/env: 'foo': No such file or directory
   cmd=$(echo "$line" | grep -oP "(?<=/usr/bin/env: ')[^']+(?=': No such file or directory)" || true)
   if [[ -n "$cmd" ]]; then
-    MISSING_COMMANDS+=("$cmd")
-    if [[ -n "${CMD_TO_APT[$cmd]:-}" ]]; then
-      APT_PACKAGES+=("${CMD_TO_APT[$cmd]}")
-    fi
+    add_missing_command "$cmd"
   fi
 
   # Python: ModuleNotFoundError: No module named 'foo'
@@ -154,6 +185,18 @@ while IFS= read -r line; do
     MISSING_COMMANDS+=("shared-lib:$lib")
   fi
 
+  if [[ "$line" == *"failed to connect to the docker API"* ]] || [[ "$line" == *"Cannot connect to the Docker daemon"* ]]; then
+    add_diagnostic "docker-daemon-unavailable"
+  fi
+
+  if [[ "$line" == *"Acquire (13: Permission denied)"* ]] || [[ "$line" == *"/var/lib/apt/lists/partial is missing"* ]]; then
+    add_diagnostic "apt-permission-denied"
+  fi
+
+  if [[ "$line" == *"pathspec"* && "$line" == *"did not match any file"* ]] || [[ "$line" == *"couldn't find remote ref"* ]]; then
+    add_diagnostic "invalid-git-ref"
+  fi
+
 done < "$LOG_FILE"
 
 # Deduplicate
@@ -161,6 +204,7 @@ APT_PACKAGES=($(printf '%s\n' "${APT_PACKAGES[@]}" 2>/dev/null | sort -u || true
 PIP_PACKAGES=($(printf '%s\n' "${PIP_PACKAGES[@]}" 2>/dev/null | sort -u || true))
 NPM_PACKAGES=($(printf '%s\n' "${NPM_PACKAGES[@]}" 2>/dev/null | sort -u || true))
 MISSING_COMMANDS=($(printf '%s\n' "${MISSING_COMMANDS[@]}" 2>/dev/null | sort -u || true))
+DIAGNOSTICS=($(printf '%s\n' "${DIAGNOSTICS[@]}" 2>/dev/null | sort -u || true))
 
 TOTAL=$(( ${#APT_PACKAGES[@]} + ${#PIP_PACKAGES[@]} + ${#NPM_PACKAGES[@]} ))
 
@@ -178,16 +222,18 @@ if [[ "$OUTPUT_JSON" == "true" ]]; then
   pip_json=$(array_to_json "${PIP_PACKAGES[@]}")
   npm_json=$(array_to_json "${NPM_PACKAGES[@]}")
   cmds_json=$(array_to_json "${MISSING_COMMANDS[@]}")
+  diagnostics_json=$(array_to_json "${DIAGNOSTICS[@]}")
   jq -n \
     --argjson apt "$apt_json" \
     --argjson pip "$pip_json" \
     --argjson npm "$npm_json" \
     --argjson cmds "$cmds_json" \
+    --argjson diagnostics "$diagnostics_json" \
     --argjson total "$TOTAL" \
-    '{total_missing: $total, missing_commands: $cmds, apt_packages: $apt, pip_packages: $pip, npm_packages: $npm}'
+    '{total_missing: $total, missing_commands: $cmds, apt_packages: $apt, pip_packages: $pip, npm_packages: $npm, diagnostics: $diagnostics}'
 else
   # Human-readable output
-  if [[ $TOTAL -eq 0 ]] && [[ ${#MISSING_COMMANDS[@]} -eq 0 ]]; then
+  if [[ $TOTAL -eq 0 ]] && [[ ${#MISSING_COMMANDS[@]} -eq 0 ]] && [[ ${#DIAGNOSTICS[@]} -eq 0 ]]; then
     echo "No missing dependencies detected in the log."
     exit 0
   fi
@@ -197,6 +243,11 @@ else
 
   if [[ ${#MISSING_COMMANDS[@]} -gt 0 ]]; then
     echo "Missing commands: ${MISSING_COMMANDS[*]}"
+    echo ""
+  fi
+
+  if [[ ${#DIAGNOSTICS[@]} -gt 0 ]]; then
+    echo "Diagnostics: ${DIAGNOSTICS[*]}"
     echo ""
   fi
 
