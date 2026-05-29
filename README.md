@@ -143,18 +143,22 @@ gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
 gh workflow run test-codespaces.yml -f latest_count=20 -f codespaces_mode=verify
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
-python3 scripts/test_codespaces_modal.py --latest 5
+uv run python scripts/test_codespaces_modal.py --latest 5
+
+# Development only: test local pruva-verify changes before publishing an image.
+# Production checks leave this off and use the binary already in the image.
+uv run python scripts/test_codespaces_modal.py --latest 5 --inject-verify
 
 # Reuse expensive setup artifacts for long repro reruns.
 # The final vulnerability checks still run fresh every time.
-python3 scripts/test_codespaces_modal.py \
+uv run python scripts/test_codespaces_modal.py \
   --repro-ids REPRO-2026-00185,REPRO-2026-00183,REPRO-2026-00172 \
   --cache-volume pruva-repro-cache \
   --max-parallel 2
 
 # Test an immutable production candidate image
 PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
-  python3 scripts/test_codespaces_modal.py --latest 20
+  uv run python scripts/test_codespaces_modal.py --latest 20
 
 # Production parity gate: checks pruva's pinned worker image contract,
 # latest-20 Codespaces readiness, and Modal smoke when credentials are present.

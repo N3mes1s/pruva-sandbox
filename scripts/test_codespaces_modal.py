@@ -24,6 +24,9 @@ Usage:
     # Reuse expensive setup artifacts between Modal runs
     python3 scripts/test_codespaces_modal.py --latest 5 --cache-volume pruva-repro-cache
 
+    # Development only: upload the local pruva-verify into the sandbox
+    python3 scripts/test_codespaces_modal.py --latest 5 --inject-verify
+
 Environment variables:
     MODAL_TOKEN_ID      Modal token ID (required)
     MODAL_TOKEN_SECRET  Modal token secret (required)
@@ -154,7 +157,14 @@ async def _write_sandbox_file(sb, path: str, data: bytes | str, mode: str):
 
 # ── Core test logic ──
 
-async def run_single_test(client, app, image, repro_id: str, cache_volume=None) -> dict:
+async def run_single_test(
+    client,
+    app,
+    image,
+    repro_id: str,
+    cache_volume=None,
+    inject_verify: bool = False,
+) -> dict:
     """Run pruva-verify for a single REPRO_ID in a Modal sandbox."""
     import modal
 
@@ -167,6 +177,7 @@ async def run_single_test(client, app, image, repro_id: str, cache_volume=None) 
         "stderr": "",
         "missing_deps": [],
         "cache_enabled": cache_volume is not None,
+        "verify_injected": inject_verify,
     }
 
     start = time.time()
@@ -193,17 +204,18 @@ async def run_single_test(client, app, image, repro_id: str, cache_volume=None) 
 
         sb = await modal.Sandbox.create.aio(**kwargs)
 
-        # Inject latest pruva-verify from local repo (may be newer than Docker image).
-        # Prefer the Rust binary built from this branch; fall back to the legacy bash script.
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        rust_verify = os.path.join(repo_root, "pruva-verify-rs", "target", "release", "pruva-verify")
-        bash_verify = os.path.join(repo_root, "pruva-verify")
-        local_verify = rust_verify if os.path.isfile(rust_verify) else bash_verify
-        if os.path.isfile(local_verify):
-            with open(local_verify, "rb") as fv:
-                await _write_sandbox_file(sb, "/usr/local/bin/pruva-verify", fv.read(), "wb")
-            inject_verify = await sb.exec.aio("chmod", "+x", "/usr/local/bin/pruva-verify")
-            await inject_verify.wait.aio()
+        if inject_verify:
+            # Development mode only. Production parity should exercise the
+            # pruva-verify already present in the tested image.
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            rust_verify = os.path.join(repo_root, "pruva-verify-rs", "target", "release", "pruva-verify")
+            bash_verify = os.path.join(repo_root, "pruva-verify")
+            local_verify = rust_verify if os.path.isfile(rust_verify) else bash_verify
+            if os.path.isfile(local_verify):
+                with open(local_verify, "rb") as fv:
+                    await _write_sandbox_file(sb, "/usr/local/bin/pruva-verify", fv.read(), "wb")
+                chmod_proc = await sb.exec.aio("chmod", "+x", "/usr/local/bin/pruva-verify")
+                await chmod_proc.wait.aio()
 
         # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
@@ -263,6 +275,7 @@ async def run_tests_parallel(
     max_parallel: int = MAX_PARALLEL,
     sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
     cache_volume_name: str = "",
+    inject_verify: bool = False,
 ) -> list[dict]:
     """Run multiple tests in parallel using Modal sandboxes."""
     os.environ["MODAL_SERVER_URL"] = "https://api.modal.com"
@@ -309,7 +322,14 @@ async def run_tests_parallel(
     async def bounded_test(repro_id):
         async with semaphore:
             print(f"  [start] {repro_id}", flush=True)
-            result = await run_single_test(client, app, image, repro_id, cache_volume=cache_volume)
+            result = await run_single_test(
+                client,
+                app,
+                image,
+                repro_id,
+                cache_volume=cache_volume,
+                inject_verify=inject_verify,
+            )
             icon = {"pass": "PASS", "fail": "FAIL", "timeout": "TIMEOUT", "error": "ERROR"}.get(result["status"], "?")
             print(f"  [{icon}]  {repro_id} ({result['duration_secs']}s)", flush=True)
             if result["missing_deps"]:
@@ -400,6 +420,7 @@ async def async_main(
     sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
     max_parallel: int = MAX_PARALLEL,
     cache_volume_name: str = "",
+    inject_verify: bool = False,
 ):
     """Main async entrypoint."""
     print("=" * 60)
@@ -409,6 +430,7 @@ async def async_main(
     print(f"  API:  {API_URL}")
     print(f"  Image: {sandbox_image}")
     print(f"  Cache: {cache_volume_name or 'disabled'}")
+    print(f"  Inject local pruva-verify: {'yes' if inject_verify else 'no'}")
     print()
 
     _setup_proxy_tunnel()
@@ -440,6 +462,7 @@ async def async_main(
         max_parallel=max_parallel,
         sandbox_image=sandbox_image,
         cache_volume_name=cache_volume_name,
+        inject_verify=inject_verify,
     )
     summary = print_results(results)
 
@@ -452,6 +475,7 @@ async def async_main(
         "errors": summary["errors"],
         "sandbox_image": sandbox_image,
         "cache_volume": cache_volume_name,
+        "inject_verify": inject_verify,
         "results": results,
     }
 
@@ -489,6 +513,11 @@ if __name__ == "__main__":
         default=os.environ.get("PRUVA_MODAL_CACHE_VOLUME", ""),
         help="Modal Volume name for per-repro setup caches (default: PRUVA_MODAL_CACHE_VOLUME)",
     )
+    parser.add_argument(
+        "--inject-verify",
+        action="store_true",
+        help="Development mode: upload local pruva-verify into the Modal sandbox instead of using the image binary",
+    )
     args = parser.parse_args()
 
     asyncio.run(
@@ -498,5 +527,6 @@ if __name__ == "__main__":
             sandbox_image=args.sandbox_image,
             max_parallel=args.max_parallel,
             cache_volume_name=args.cache_volume,
+            inject_verify=args.inject_verify,
         )
     )

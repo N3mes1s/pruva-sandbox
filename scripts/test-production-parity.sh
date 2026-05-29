@@ -27,7 +27,7 @@ RUN_CODESPACES=true
 RUN_MODAL=auto
 RUN_MANIFEST=true
 FETCH_PRUVA=false
-PYTHON_BIN="${PYTHON:-python3}"
+PYTHON_CMD=()
 
 WORKTREE_DIR=""
 CHECK_PRUVA_REPO=""
@@ -59,12 +59,14 @@ ENVIRONMENT:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required only when Modal runs.
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
     PRUVA_MODAL_CACHE_VOLUME can also be used instead of --modal-cache-volume.
+    PYTHON can override the Python interpreter used for Modal. By default the
+    script prefers .venv/bin/python, then uv run python, then python3.
 
 WHAT IT VALIDATES:
     1. pruva worker/docker image pinning through make sandbox-image-check
     2. optional GHCR manifest resolution for the pinned sandbox digest
     3. pruva-sandbox latest-N Codespaces readiness against the same digest
-    4. optional Modal pruva-verify smoke against the same digest
+    4. optional Modal pruva-verify smoke against the same digest using the image binary
 EOF
 }
 
@@ -146,6 +148,16 @@ done
 git -C "$PRUVA_REPO" rev-parse --git-dir >/dev/null 2>&1 || fail "pruva repo not found: $PRUVA_REPO"
 [[ "$LATEST" =~ ^[0-9]+$ ]] || fail "--latest must be numeric"
 
+if [[ -n "${PYTHON:-}" ]]; then
+  PYTHON_CMD=("$PYTHON")
+elif [[ -x "$SANDBOX_REPO/.venv/bin/python" ]]; then
+  PYTHON_CMD=("$SANDBOX_REPO/.venv/bin/python")
+elif command -v uv >/dev/null 2>&1; then
+  PYTHON_CMD=(uv run python)
+else
+  PYTHON_CMD=(python3)
+fi
+
 if [[ "$FETCH_PRUVA" == true ]]; then
   log "Fetching pruva repo"
   git -C "$PRUVA_REPO" fetch origin
@@ -210,18 +222,19 @@ elif [[ "$modal_id_state" != set || "$modal_secret_state" != set ]]; then
   fi
   warn "Modal credentials missing; skipping Modal smoke"
 else
-  if ! "$PYTHON_BIN" -c 'import modal' >/dev/null 2>&1; then
-    fail "Python package 'modal' is not installed for $PYTHON_BIN"
+  if ! "${PYTHON_CMD[@]}" -c 'import modal' >/dev/null 2>&1; then
+    fail "Python package 'modal' is not installed for ${PYTHON_CMD[*]}"
   fi
 
   log "Running Modal smoke for $MODAL_REPRO_IDS"
+  log "Using Python for Modal: ${PYTHON_CMD[*]}"
   modal_args=(--repro-ids "$MODAL_REPRO_IDS" --sandbox-image "$SANDBOX_IMAGE")
   if [[ -n "$MODAL_CACHE_VOLUME" ]]; then
     log "Using Modal cache volume: $MODAL_CACHE_VOLUME"
     modal_args+=(--cache-volume "$MODAL_CACHE_VOLUME")
   fi
   PRUVA_API_URL="$API_URL" PRUVA_SANDBOX_IMAGE="$SANDBOX_IMAGE" \
-    "$PYTHON_BIN" "$SANDBOX_REPO/scripts/test_codespaces_modal.py" \
+    "${PYTHON_CMD[@]}" "$SANDBOX_REPO/scripts/test_codespaces_modal.py" \
       "${modal_args[@]}"
   pass "Modal smoke passed"
 fi
