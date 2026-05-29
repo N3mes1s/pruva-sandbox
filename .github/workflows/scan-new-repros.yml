@@ -168,7 +168,7 @@ jobs:
   # Run Codespace tests on the latest branches after scanning
   test-codespaces:
     needs: scan-and-create-branches
-    if: inputs.run_tests != 'false'
+    if: ${{ inputs.run_tests }}
     uses: ./.github/workflows/test-codespaces.yml
     with:
       latest_count: ${{ inputs.test_count || '10' }}

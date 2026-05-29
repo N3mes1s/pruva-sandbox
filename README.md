@@ -6,7 +6,7 @@ Isolated environment for running [Pruva](https://pruva.dev) vulnerability reprod
 
 ## How It Works
 
-1. Open a Codespace with a `REPRO_ID` environment variable
+1. Open a Codespace from a `repro/<REPRO_ID>` branch
 2. The `pruva-verify` CLI fetches the reproduction metadata and script from the Pruva API
 3. The script runs automatically inside the sandboxed container
 4. Results are reported with pass/fail status, timing, and logs
@@ -18,7 +18,7 @@ Click "Open in Codespaces" on any reproduction at [pruva.dev](https://pruva.dev/
 Or use a direct URL with any reproduction ID:
 
 ```
-https://codespaces.new/N3mes1s/pruva-sandbox?env[REPRO_ID]=REPRO-2026-00006
+https://github.com/codespaces/new?hide_repo_select=true&ref=repro/REPRO-2026-00006&repo=N3mes1s/pruva-sandbox
 ```
 
 ## Install `pruva-verify` Locally
