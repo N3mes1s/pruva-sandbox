@@ -5,7 +5,7 @@
 # This exercises the actual user path:
 #   1. create a Codespace from repro/<REPRO_ID>
 #   2. wait until GitHub reports it is available
-#   3. optionally ask gh to wait for post-create status/logs, which requires SSH
+#   3. optionally SSH in, reject recovery containers, and run pruva-verify
 #   4. delete the Codespace unless --keep is set
 #
 set -euo pipefail
@@ -18,6 +18,7 @@ KEEP=false
 IDLE_TIMEOUT="10m"
 RETENTION_PERIOD="1h"
 CREATE_TIMEOUT="45m"
+SSH_TIMEOUT="10m"
 MACHINE=""
 LOCATION=""
 MODE="available"
@@ -44,16 +45,17 @@ OPTIONS:
     --idle-timeout VALUE   Codespace idle timeout (default: ${IDLE_TIMEOUT})
     --retention VALUE      Codespace retention period (default: ${RETENTION_PERIOD})
     --create-timeout VALUE Max time for Codespace creation (default: ${CREATE_TIMEOUT})
-    --mode MODE            Test mode: available or status (default: ${MODE}).
+    --ssh-timeout VALUE    Max time to wait for SSH in verify mode (default: ${SSH_TIMEOUT})
+    --mode MODE            Test mode: available or verify (default: ${MODE}).
                            available waits for GitHub API state only, matching
-                           the web UI creation path. status also waits for
-                           post-create output through gh's SSH transport.
+                           the web UI creation path. verify SSHes into the
+                           Codespace and runs pruva-verify.
     --keep                Keep created Codespaces for debugging.
     -h, --help            Show this help message.
 
 REQUIRES:
     gh auth refresh -h github.com -s codespace
-    --mode status also requires an SSH-capable devcontainer.
+    --mode verify also requires an SSH-capable devcontainer.
 EOF
 }
 
@@ -187,8 +189,53 @@ wait_for_codespace_available() {
   return 1
 }
 
+wait_for_codespace_ssh() {
+  local codespace="$1"
+  local deadline=$((SECONDS + 600))
+  if [[ "$SSH_TIMEOUT" =~ ^([0-9]+)m$ ]]; then
+    deadline=$((SECONDS + (${BASH_REMATCH[1]} * 60)))
+  elif [[ "$SSH_TIMEOUT" =~ ^([0-9]+)s$ ]]; then
+    deadline=$((SECONDS + BASH_REMATCH[1]))
+  fi
+
+  while [[ $SECONDS -lt $deadline ]]; do
+    if gh codespace ssh --codespace "$codespace" -- true >/dev/null 2>&1; then
+      return 0
+    fi
+    log "Waiting for SSH in ${codespace}"
+    sleep 10
+  done
+  fail "Timed out waiting for SSH in Codespace ${codespace}"
+  return 1
+}
+
+verify_in_codespace() {
+  local codespace="$1"
+  local repro_id="$2"
+  local remote_script quoted_script
+
+  remote_script="set -euo pipefail
+if [ \"\${CODESPACES_RECOVERY_CONTAINER:-}\" = \"true\" ]; then
+  echo 'ERROR: connected to a Codespaces recovery container, not the Pruva devcontainer' >&2
+  exit 2
+fi
+test -f /etc/pruva-sandbox-version
+command -v pruva-verify >/dev/null
+echo '== sandbox =='
+cat /etc/pruva-sandbox-version
+echo '== verify =='
+pruva-verify '${repro_id}'"
+  printf -v quoted_script "%q" "$remote_script"
+  gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}"
+}
+
 test_one_repro() {
   local repro_id="$1"
+  if [[ ! "$repro_id" =~ ^REPRO-[0-9]{4}-[0-9]{5}$ ]]; then
+    fail "Invalid REPRO_ID: ${repro_id}"
+    return 1
+  fi
+
   local branch="repro/${repro_id}"
   local short_id="${repro_id#REPRO-}"
   local display_name="pruva-smoke-${short_id}-$(date +%m%d%H%M%S)"
@@ -215,9 +262,6 @@ test_one_repro() {
     --default-permissions
     --machine "$machine"
   )
-  if [[ "$MODE" == "status" ]]; then
-    args+=(--status)
-  fi
   if [[ -n "$LOCATION" ]]; then
     args+=(--location "$LOCATION")
   fi
@@ -234,20 +278,32 @@ test_one_repro() {
   if [[ -n "$codespace_name" ]]; then
     CREATED_CODESPACES+=("$codespace_name")
     log "Codespace: ${codespace_name}"
-    if [[ "$MODE" == "status" ]]; then
-      log "Codespace logs for ${codespace_name}:"
-      gh codespace logs --codespace "$codespace_name" || true
-    elif ! wait_for_codespace_available "$codespace_name"; then
+    if ! wait_for_codespace_available "$codespace_name"; then
       delete_codespace "$codespace_name"
       rm -f "$output_file"
       return 1
+    fi
+    if [[ "$MODE" == "verify" ]]; then
+      if ! wait_for_codespace_ssh "$codespace_name"; then
+        gh codespace logs --codespace "$codespace_name" || true
+        delete_codespace "$codespace_name"
+        rm -f "$output_file"
+        return 1
+      fi
+      log "Running pruva-verify in ${codespace_name}"
+      if ! verify_in_codespace "$codespace_name" "$repro_id"; then
+        gh codespace logs --codespace "$codespace_name" || true
+        delete_codespace "$codespace_name"
+        rm -f "$output_file"
+        return 1
+      fi
     fi
   else
     fail "Could not find created Codespace with display name ${display_name}"
   fi
 
   if [[ $create_rc -ne 0 ]]; then
-    fail "Codespace create/status failed for ${repro_id} (exit ${create_rc})"
+    fail "Codespace create failed for ${repro_id} (exit ${create_rc})"
     delete_codespace "$codespace_name"
     rm -f "$output_file"
     return 1
@@ -308,6 +364,10 @@ while [[ $# -gt 0 ]]; do
       CREATE_TIMEOUT="$2"
       shift 2
       ;;
+    --ssh-timeout)
+      SSH_TIMEOUT="$2"
+      shift 2
+      ;;
     --mode)
       MODE="$2"
       shift 2
@@ -333,9 +393,9 @@ require_command jq
 require_command curl
 
 case "$MODE" in
-  available|status) ;;
+  available|verify) ;;
   *)
-    fail "Invalid --mode '${MODE}' (expected available or status)"
+    fail "Invalid --mode '${MODE}' (expected available or verify)"
     exit 1
     ;;
 esac

@@ -130,8 +130,8 @@ The test suite covers input validation, artifact path normalization, script sele
 # Real GitHub Codespaces smoke test, matching the web UI creation path.
 ./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185
 
-# Optional post-create status/log collection through gh's SSH transport.
-./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185 --mode status
+# Full Codespaces execution check through gh's SSH transport.
+./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185 --mode verify
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 python3 scripts/test_codespaces_modal.py --latest 5
