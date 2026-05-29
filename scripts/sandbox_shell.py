@@ -29,7 +29,7 @@ sys.stdout.reconfigure(line_buffering=True)
 API_URL = os.environ.get("PRUVA_API_URL", "https://pruva-api-production.up.railway.app/v1")
 DEFAULT_SANDBOX_IMAGE = os.environ.get(
     "PRUVA_SANDBOX_IMAGE",
-    "ghcr.io/n3mes1s/pruva-sandbox:latest",
+    "ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374",
 )
 PROXY_URL = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", "")
 

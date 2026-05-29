@@ -44,8 +44,10 @@ jobs:
         id: scan
         env:
           API_URL: ${{ inputs.api_url }}
+          DEFAULT_SANDBOX_IMAGE: ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374
         run: |
           echo "Fetching reproductions from $API_URL..."
+          echo "Default sandbox image: $DEFAULT_SANDBOX_IMAGE"
 
           # Fetch all reproductions (paginated)
           REPROS=$(curl -sf "$API_URL/reproductions?status=published&limit=1000" | jq -r '.reproductions[].repro_id')
@@ -67,7 +69,7 @@ jobs:
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
             REPRO_JSON=$(curl -sf "$API_URL/reproductions/$REPRO_ID" || echo "{}")
-            EXPECTED_IMAGE=$(echo "$REPRO_JSON" | jq -r '.environment.sandbox_image // empty')
+            EXPECTED_IMAGE=$(echo "$REPRO_JSON" | jq -r --arg default_image "$DEFAULT_SANDBOX_IMAGE" '.environment.sandbox_image // $default_image')
 
             # Check if branch exists and if it's properly configured
             if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
@@ -79,7 +81,7 @@ jobs:
               CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
               CURRENT_DOCKER_MOBY=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby // "unset"')
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ "$CURRENT_DOCKER_MOBY" = "false" ] && { [ -z "$EXPECTED_IMAGE" ] || { [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; }; }; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ "$CURRENT_DOCKER_MOBY" = "false" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
@@ -91,17 +93,13 @@ jobs:
               git fetch origin "$BRANCH:$BRANCH"
               git checkout "$BRANCH"
 
-              # Update devcontainer.json to set correct REPRO_ID and pinned image when API metadata has one
+              # Update devcontainer.json to set correct REPRO_ID and pinned image.
+              # Prefer the image that the worker recorded; fall back to the production default
+              # so older API records do not keep Codespaces on :latest.
               tmp_devcontainer=$(mktemp)
-              if [ -n "$EXPECTED_IMAGE" ]; then
-                jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
-                  '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
-                  .devcontainer/devcontainer.json > "$tmp_devcontainer"
-              else
-                jq --arg repro_id "$REPRO_ID" \
-                  '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id' \
-                  .devcontainer/devcontainer.json > "$tmp_devcontainer"
-              fi
+              jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
+                '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+                .devcontainer/devcontainer.json > "$tmp_devcontainer"
               mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 
               # Commit and force-push fix
@@ -123,17 +121,11 @@ jobs:
             # Create branch from main
             git checkout -b "$BRANCH" origin/main
 
-            # Update devcontainer.json to set REPRO_ID and pinned image when API metadata has one
+            # Update devcontainer.json to set REPRO_ID and pinned image.
             tmp_devcontainer=$(mktemp)
-            if [ -n "$EXPECTED_IMAGE" ]; then
-              jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
-                '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
-                .devcontainer/devcontainer.json > "$tmp_devcontainer"
-            else
-              jq --arg repro_id "$REPRO_ID" \
-                '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id' \
-                .devcontainer/devcontainer.json > "$tmp_devcontainer"
-            fi
+            jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
+              '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+              .devcontainer/devcontainer.json > "$tmp_devcontainer"
             mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 
             # Commit changes
