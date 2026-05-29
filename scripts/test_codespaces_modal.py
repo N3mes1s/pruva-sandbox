@@ -21,12 +21,16 @@ Usage:
     # Test latest N
     python3 scripts/test_codespaces_modal.py --latest 5
 
+    # Reuse expensive setup artifacts between Modal runs
+    python3 scripts/test_codespaces_modal.py --latest 5 --cache-volume pruva-repro-cache
+
 Environment variables:
     MODAL_TOKEN_ID      Modal token ID (required)
     MODAL_TOKEN_SECRET  Modal token secret (required)
     HTTPS_PROXY         HTTP proxy URL (optional, for tunneling)
     PRUVA_API_URL       Pruva API base URL (optional)
     PRUVA_SANDBOX_IMAGE pruva-sandbox image to test (optional)
+    PRUVA_MODAL_CACHE_VOLUME Modal Volume name for setup caches (optional)
 """
 
 import asyncio
@@ -51,6 +55,7 @@ DEFAULT_SANDBOX_IMAGE = os.environ.get(
 )
 PROXY_URL = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", "")
 MAX_PARALLEL = 5  # Max concurrent sandboxes
+CACHE_MOUNT_PATH = "/tmp/pruva-cache"
 
 
 # ── Proxy tunnel support for grpclib ──
@@ -149,7 +154,7 @@ async def _write_sandbox_file(sb, path: str, data: bytes | str, mode: str):
 
 # ── Core test logic ──
 
-async def run_single_test(client, app, image, repro_id: str) -> dict:
+async def run_single_test(client, app, image, repro_id: str, cache_volume=None) -> dict:
     """Run pruva-verify for a single REPRO_ID in a Modal sandbox."""
     import modal
 
@@ -161,19 +166,32 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
         "stdout": "",
         "stderr": "",
         "missing_deps": [],
+        "cache_enabled": cache_volume is not None,
     }
 
     start = time.time()
+    sb = None
     try:
-        sb = await modal.Sandbox.create.aio(
-            app=app, image=image, timeout=1800, client=client,
-            env={
-                "PRUVA_SANDBOX": "true",
-                "PRUVA_API_URL": API_URL,
-                "REPRO_ID": repro_id,
-                "PRUVA_RESULTS_DIR": "/tmp/pruva-results",
-            },
-        )
+        env = {
+            "PRUVA_SANDBOX": "true",
+            "PRUVA_API_URL": API_URL,
+            "REPRO_ID": repro_id,
+            "PRUVA_RESULTS_DIR": "/tmp/pruva-results",
+        }
+        kwargs = {
+            "app": app,
+            "image": image,
+            "timeout": 1800,
+            "client": client,
+            "env": env,
+        }
+        if cache_volume is not None:
+            env["PRUVA_REPRO_CACHE_DIR"] = CACHE_MOUNT_PATH
+            kwargs["volumes"] = {
+                CACHE_MOUNT_PATH: cache_volume.with_mount_options(sub_path=f"/{repro_id}")
+            }
+
+        sb = await modal.Sandbox.create.aio(**kwargs)
 
         # Inject latest pruva-verify from local repo (may be newer than Docker image).
         # Prefer the Rust binary built from this branch; fall back to the legacy bash script.
@@ -204,14 +222,18 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
         result["stdout"] = "".join(stdout_lines)[-10000:]
         result["status"] = "pass" if proc.returncode == 0 else "fail"
 
-        await sb.terminate.aio()
-
     except asyncio.TimeoutError:
         result["status"] = "timeout"
         result["stderr"] = "Sandbox timed out"
     except Exception as e:
         result["status"] = "error"
         result["stderr"] = f"{type(e).__name__}: {e}"
+    finally:
+        if sb is not None:
+            try:
+                await sb.terminate.aio(wait=True)
+            except Exception:
+                pass
 
     result["duration_secs"] = round(time.time() - start, 1)
 
@@ -240,6 +262,7 @@ async def run_tests_parallel(
     ids: list[str],
     max_parallel: int = MAX_PARALLEL,
     sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
+    cache_volume_name: str = "",
 ) -> list[dict]:
     """Run multiple tests in parallel using Modal sandboxes."""
     os.environ["MODAL_SERVER_URL"] = "https://api.modal.com"
@@ -272,6 +295,13 @@ async def run_tests_parallel(
     # add_python is required by Modal's sandbox runtime (installs Modal's
     # internal Python via micromamba; does NOT modify pruva-sandbox tools)
     image = modal.Image.from_registry(sandbox_image, add_python="3.12")
+    cache_volume = None
+    if cache_volume_name:
+        cache_volume = modal.Volume.from_name(cache_volume_name, create_if_missing=True)
+        print(
+            f"[modal] Cache enabled: volume={cache_volume_name} mount={CACHE_MOUNT_PATH} sub_path=/<REPRO_ID>",
+            flush=True,
+        )
 
     semaphore = asyncio.Semaphore(max_parallel)
     results = []
@@ -279,7 +309,7 @@ async def run_tests_parallel(
     async def bounded_test(repro_id):
         async with semaphore:
             print(f"  [start] {repro_id}", flush=True)
-            result = await run_single_test(client, app, image, repro_id)
+            result = await run_single_test(client, app, image, repro_id, cache_volume=cache_volume)
             icon = {"pass": "PASS", "fail": "FAIL", "timeout": "TIMEOUT", "error": "ERROR"}.get(result["status"], "?")
             print(f"  [{icon}]  {repro_id} ({result['duration_secs']}s)", flush=True)
             if result["missing_deps"]:
@@ -368,6 +398,8 @@ async def async_main(
     repro_ids: str = "",
     latest: int = 10,
     sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
+    max_parallel: int = MAX_PARALLEL,
+    cache_volume_name: str = "",
 ):
     """Main async entrypoint."""
     print("=" * 60)
@@ -376,6 +408,7 @@ async def async_main(
     print(f"  Time: {datetime.now().isoformat()}")
     print(f"  API:  {API_URL}")
     print(f"  Image: {sandbox_image}")
+    print(f"  Cache: {cache_volume_name or 'disabled'}")
     print()
 
     _setup_proxy_tunnel()
@@ -399,10 +432,15 @@ async def async_main(
         print(f"  - {rid}")
     print()
 
-    print(f"Launching tests in Modal sandboxes (max {MAX_PARALLEL} parallel)...")
+    print(f"Launching tests in Modal sandboxes (max {max_parallel} parallel)...")
     print()
 
-    results = await run_tests_parallel(ids, sandbox_image=sandbox_image)
+    results = await run_tests_parallel(
+        ids,
+        max_parallel=max_parallel,
+        sandbox_image=sandbox_image,
+        cache_volume_name=cache_volume_name,
+    )
     summary = print_results(results)
 
     # Output JSON results for CI integration
@@ -413,6 +451,7 @@ async def async_main(
         "failed": summary["failed"],
         "errors": summary["errors"],
         "sandbox_image": sandbox_image,
+        "cache_volume": cache_volume_name,
         "results": results,
     }
 
@@ -438,6 +477,18 @@ if __name__ == "__main__":
         default=DEFAULT_SANDBOX_IMAGE,
         help="pruva-sandbox image to test (default: PRUVA_SANDBOX_IMAGE or latest)",
     )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=MAX_PARALLEL,
+        help=f"Maximum concurrent Modal sandboxes (default: {MAX_PARALLEL})",
+    )
+    parser.add_argument(
+        "--cache-volume",
+        type=str,
+        default=os.environ.get("PRUVA_MODAL_CACHE_VOLUME", ""),
+        help="Modal Volume name for per-repro setup caches (default: PRUVA_MODAL_CACHE_VOLUME)",
+    )
     args = parser.parse_args()
 
     asyncio.run(
@@ -445,5 +496,7 @@ if __name__ == "__main__":
             repro_ids=args.repro_ids,
             latest=args.latest,
             sandbox_image=args.sandbox_image,
+            max_parallel=args.max_parallel,
+            cache_volume_name=args.cache_volume,
         )
     )

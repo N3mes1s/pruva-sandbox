@@ -22,6 +22,7 @@ API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
 LATEST="${LATEST:-20}"
 SANDBOX_IMAGE_OVERRIDE="${PRUVA_SANDBOX_IMAGE:-}"
 MODAL_REPRO_IDS="${MODAL_REPRO_IDS:-REPRO-2026-00185}"
+MODAL_CACHE_VOLUME="${PRUVA_MODAL_CACHE_VOLUME:-}"
 RUN_CODESPACES=true
 RUN_MODAL=auto
 RUN_MANIFEST=true
@@ -50,11 +51,14 @@ OPTIONS:
     --skip-modal            Skip Modal smoke
     --require-modal         Fail if Modal credentials are absent, then run Modal smoke
     --modal-repro-ids IDS   Comma-separated Modal smoke repro IDs (default: REPRO-2026-00185)
+    --modal-cache-volume NAME
+                           Modal Volume name for per-repro setup caches
     -h, --help              Show this help
 
 ENVIRONMENT:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required only when Modal runs.
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
+    PRUVA_MODAL_CACHE_VOLUME can also be used instead of --modal-cache-volume.
 
 WHAT IT VALIDATES:
     1. pruva worker/docker image pinning through make sandbox-image-check
@@ -123,6 +127,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --modal-repro-ids)
       MODAL_REPRO_IDS="$2"
+      shift 2
+      ;;
+    --modal-cache-volume)
+      MODAL_CACHE_VOLUME="$2"
       shift 2
       ;;
     -h|--help)
@@ -207,10 +215,14 @@ else
   fi
 
   log "Running Modal smoke for $MODAL_REPRO_IDS"
+  modal_args=(--repro-ids "$MODAL_REPRO_IDS" --sandbox-image "$SANDBOX_IMAGE")
+  if [[ -n "$MODAL_CACHE_VOLUME" ]]; then
+    log "Using Modal cache volume: $MODAL_CACHE_VOLUME"
+    modal_args+=(--cache-volume "$MODAL_CACHE_VOLUME")
+  fi
   PRUVA_API_URL="$API_URL" PRUVA_SANDBOX_IMAGE="$SANDBOX_IMAGE" \
     "$PYTHON_BIN" "$SANDBOX_REPO/scripts/test_codespaces_modal.py" \
-      --repro-ids "$MODAL_REPRO_IDS" \
-      --sandbox-image "$SANDBOX_IMAGE"
+      "${modal_args[@]}"
   pass "Modal smoke passed"
 fi
 
