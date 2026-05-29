@@ -26,6 +26,7 @@ Environment variables:
     MODAL_TOKEN_SECRET  Modal token secret (required)
     HTTPS_PROXY         HTTP proxy URL (optional, for tunneling)
     PRUVA_API_URL       Pruva API base URL (optional)
+    PRUVA_SANDBOX_IMAGE pruva-sandbox image to test (optional)
 """
 
 import asyncio
@@ -44,6 +45,10 @@ from datetime import datetime
 sys.stdout.reconfigure(line_buffering=True)
 
 API_URL = os.environ.get("PRUVA_API_URL", "https://pruva-api-production.up.railway.app/v1")
+DEFAULT_SANDBOX_IMAGE = os.environ.get(
+    "PRUVA_SANDBOX_IMAGE",
+    "ghcr.io/n3mes1s/pruva-sandbox:latest",
+)
 PROXY_URL = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", "")
 MAX_PARALLEL = 5  # Max concurrent sandboxes
 
@@ -231,7 +236,11 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
     return result
 
 
-async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -> list[dict]:
+async def run_tests_parallel(
+    ids: list[str],
+    max_parallel: int = MAX_PARALLEL,
+    sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
+) -> list[dict]:
     """Run multiple tests in parallel using Modal sandboxes."""
     os.environ["MODAL_SERVER_URL"] = "https://api.modal.com"
 
@@ -262,7 +271,7 @@ async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -
 
     # add_python is required by Modal's sandbox runtime (installs Modal's
     # internal Python via micromamba; does NOT modify pruva-sandbox tools)
-    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
+    image = modal.Image.from_registry(sandbox_image, add_python="3.12")
 
     semaphore = asyncio.Semaphore(max_parallel)
     results = []
@@ -355,13 +364,18 @@ def print_results(results: list[dict]):
     return {"passed": passed, "failed": failed, "errors": errors}
 
 
-async def async_main(repro_ids: str = "", latest: int = 10):
+async def async_main(
+    repro_ids: str = "",
+    latest: int = 10,
+    sandbox_image: str = DEFAULT_SANDBOX_IMAGE,
+):
     """Main async entrypoint."""
     print("=" * 60)
     print("  Pruva Codespace Test (Modal Sandboxes)")
     print("=" * 60)
     print(f"  Time: {datetime.now().isoformat()}")
     print(f"  API:  {API_URL}")
+    print(f"  Image: {sandbox_image}")
     print()
 
     _setup_proxy_tunnel()
@@ -388,7 +402,7 @@ async def async_main(repro_ids: str = "", latest: int = 10):
     print(f"Launching tests in Modal sandboxes (max {MAX_PARALLEL} parallel)...")
     print()
 
-    results = await run_tests_parallel(ids)
+    results = await run_tests_parallel(ids, sandbox_image=sandbox_image)
     summary = print_results(results)
 
     # Output JSON results for CI integration
@@ -398,6 +412,7 @@ async def async_main(repro_ids: str = "", latest: int = 10):
         "passed": summary["passed"],
         "failed": summary["failed"],
         "errors": summary["errors"],
+        "sandbox_image": sandbox_image,
         "results": results,
     }
 
@@ -417,6 +432,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Codespace reproductions via Modal sandboxes")
     parser.add_argument("--repro-ids", type=str, default="", help="Comma-separated REPRO_IDs")
     parser.add_argument("--latest", type=int, default=10, help="Test latest N reproductions")
+    parser.add_argument(
+        "--sandbox-image",
+        type=str,
+        default=DEFAULT_SANDBOX_IMAGE,
+        help="pruva-sandbox image to test (default: PRUVA_SANDBOX_IMAGE or latest)",
+    )
     args = parser.parse_args()
 
-    asyncio.run(async_main(repro_ids=args.repro_ids, latest=args.latest))
+    asyncio.run(
+        async_main(
+            repro_ids=args.repro_ids,
+            latest=args.latest,
+            sandbox_image=args.sandbox_image,
+        )
+    )

@@ -13,6 +13,7 @@ Environment variables:
     MODAL_TOKEN_ID      Modal token ID (required)
     MODAL_TOKEN_SECRET  Modal token secret (required)
     HTTPS_PROXY         HTTP proxy URL (optional)
+    PRUVA_SANDBOX_IMAGE pruva-sandbox image to run (optional)
 """
 
 import asyncio
@@ -26,6 +27,10 @@ import urllib.parse
 sys.stdout.reconfigure(line_buffering=True)
 
 API_URL = os.environ.get("PRUVA_API_URL", "https://pruva-api-production.up.railway.app/v1")
+DEFAULT_SANDBOX_IMAGE = os.environ.get(
+    "PRUVA_SANDBOX_IMAGE",
+    "ghcr.io/n3mes1s/pruva-sandbox:latest",
+)
 PROXY_URL = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", "")
 
 
@@ -107,7 +112,7 @@ async def run_cmd(sb, cmd):
     return proc.returncode, "".join(out)
 
 
-async def main(repro_id: str = ""):
+async def main(repro_id: str = "", sandbox_image: str = DEFAULT_SANDBOX_IMAGE):
     import modal
 
     _setup_proxy_tunnel()
@@ -123,7 +128,8 @@ async def main(repro_id: str = ""):
     print("[modal] Connecting...", flush=True)
     client = await modal.Client.from_credentials.aio(token_id, token_secret)
     app = await modal.App.lookup.aio("pruva-codespace-tests", create_if_missing=True, client=client)
-    image = modal.Image.from_registry("ghcr.io/n3mes1s/pruva-sandbox:latest", add_python="3.12")
+    print(f"[modal] Image: {sandbox_image}", flush=True)
+    image = modal.Image.from_registry(sandbox_image, add_python="3.12")
 
     env = {"PRUVA_SANDBOX": "true", "PRUVA_API_URL": API_URL}
     if repro_id:
@@ -161,6 +167,12 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Interactive shell into Modal sandbox")
     parser.add_argument("--repro-id", type=str, default="", help="REPRO_ID to set in env")
+    parser.add_argument(
+        "--sandbox-image",
+        type=str,
+        default=DEFAULT_SANDBOX_IMAGE,
+        help="pruva-sandbox image to run (default: PRUVA_SANDBOX_IMAGE or latest)",
+    )
     args = parser.parse_args()
 
-    asyncio.run(main(repro_id=args.repro_id))
+    asyncio.run(main(repro_id=args.repro_id, sandbox_image=args.sandbox_image))
