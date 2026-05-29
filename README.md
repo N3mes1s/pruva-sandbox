@@ -140,7 +140,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them to the GitHub Release. The Dockerfile automatically pulls the latest release binary.
+This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them to the GitHub Release. The devcontainer image builds `pruva-verify` from the same checked-out source commit, so Codespaces and the `pruva-rs` worker image do not depend on a separate release being published first.
 
 ## Docker-in-Docker for Special Cases
 
