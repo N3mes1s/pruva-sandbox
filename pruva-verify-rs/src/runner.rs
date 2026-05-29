@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::Path;
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -24,9 +25,7 @@ pub fn run_script(script_path: &Path, work_dir: &Path) -> Result<RunResult> {
 
     let start = Instant::now();
 
-    let status = Command::new(script_path)
-        .current_dir(work_dir)
-        .status()
+    let status = execute_script_with_retry(script_path, work_dir)
         .with_context(|| format!("Failed to execute {}", script_path.display()))?;
 
     let duration = start.elapsed().as_secs();
@@ -41,6 +40,25 @@ pub fn run_script(script_path: &Path, work_dir: &Path) -> Result<RunResult> {
         exit_code,
         duration_secs: duration,
     })
+}
+
+fn execute_script_with_retry(script_path: &Path, work_dir: &Path) -> std::io::Result<ExitStatus> {
+    const ETXTBSY: i32 = 26;
+    const MAX_ATTEMPTS: usize = 3;
+
+    let mut last_error = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match Command::new(script_path).current_dir(work_dir).status() {
+            Ok(status) => return Ok(status),
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) && attempt < MAX_ATTEMPTS => {
+                last_error = Some(error);
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_error.expect("ETXTBSY retry loop should retain the last error"))
 }
 
 /// Print a success report after a passed verification.
