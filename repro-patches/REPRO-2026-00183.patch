@@ -1,6 +1,16 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -10,11 +10,16 @@
+@@ -6,15 +6,25 @@
+ LOGS="$ROOT/logs"
+ REPRO="$ROOT/repro"
+-EXTERNAL="$ROOT/external"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    EXTERNAL="${PRUVA_REPRO_CACHE_DIR}/mapserver-rel-8-6-0-rel-8-6-1-asan-$(uname -m)-1"
++    echo "[*] Using MapServer setup cache: $EXTERNAL"
++else
++    EXTERNAL="$ROOT/external"
++fi
+ mkdir -p "$LOGS" "$REPRO" "$EXTERNAL"
  
  cd "$ROOT"
  

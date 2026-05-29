@@ -145,6 +145,13 @@ gh workflow run test-codespaces.yml -f latest_count=20 -f codespaces_mode=verify
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 python3 scripts/test_codespaces_modal.py --latest 5
 
+# Reuse expensive setup artifacts for long repro reruns.
+# The final vulnerability checks still run fresh every time.
+python3 scripts/test_codespaces_modal.py \
+  --repro-ids REPRO-2026-00185,REPRO-2026-00183,REPRO-2026-00172 \
+  --cache-volume pruva-repro-cache \
+  --max-parallel 2
+
 # Test an immutable production candidate image
 PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
   python3 scripts/test_codespaces_modal.py --latest 20
@@ -155,6 +162,12 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 
 # Require Modal for the production gate.
 ./scripts/test-production-parity.sh --require-modal --modal-repro-ids REPRO-2026-00185
+
+# Require Modal and reuse setup cache for long repro reruns.
+./scripts/test-production-parity.sh \
+  --require-modal \
+  --modal-repro-ids REPRO-2026-00185,REPRO-2026-00183,REPRO-2026-00172 \
+  --modal-cache-volume pruva-repro-cache
 ```
 
 ### Releasing a new binary
