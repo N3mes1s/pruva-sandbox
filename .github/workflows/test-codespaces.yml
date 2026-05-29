@@ -211,9 +211,18 @@ jobs:
         run: |
           chmod +x scripts/detect-missing-deps.sh
           LOG="/tmp/pruva-${{ matrix.repro_id }}.log"
+          EMPTY_DEPS='{"total_missing":0,"missing_commands":[],"apt_packages":[],"pip_packages":[],"npm_packages":[]}'
 
           echo "::group::Analyzing failure log for missing dependencies"
-          DEPS_JSON=$(./scripts/detect-missing-deps.sh "$LOG" --json)
+          if ! DEPS_JSON=$(./scripts/detect-missing-deps.sh "$LOG" --json); then
+            echo "::warning::Dependency detection failed; treating as no missing dependencies"
+            DEPS_JSON="$EMPTY_DEPS"
+          fi
+          if ! echo "$DEPS_JSON" | jq empty; then
+            echo "::warning::Dependency detection returned invalid JSON; treating as no missing dependencies"
+            DEPS_JSON="$EMPTY_DEPS"
+          fi
+          DEPS_JSON=$(echo "$DEPS_JSON" | jq -c .)
           echo "$DEPS_JSON" | jq .
           echo "::endgroup::"
 
@@ -308,6 +317,7 @@ jobs:
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
             echo "needs_deps=false" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
 
   # Job 4: Collect missing dependencies and open an issue to update Dockerfile
@@ -342,7 +352,7 @@ jobs:
             LOG=$(ls "$log_dir"/*.log 2>/dev/null | head -1 || echo "")
             if [ -z "$LOG" ]; then continue; fi
 
-            DEPS=$(./scripts/detect-missing-deps.sh "$LOG" --json 2>/dev/null || echo '{"total_missing":0}')
+            DEPS=$(./scripts/detect-missing-deps.sh "$LOG" --json 2>/dev/null || echo '{"total_missing":0,"missing_commands":[],"apt_packages":[],"pip_packages":[],"npm_packages":[]}')
             TOTAL=$(echo "$DEPS" | jq '.total_missing')
 
             if [ "$TOTAL" -gt 0 ]; then

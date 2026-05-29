@@ -57,6 +57,8 @@ declare -A CMD_TO_APT=(
   [mysql]="mysql-client"
   [redis-cli]="redis-tools"
   [openssl]="openssl"
+  [curl]="curl"
+  [wget]="wget"
   [xmllint]="libxml2-utils"
   [xsltproc]="xsltproc"
   [ffmpeg]="ffmpeg"
@@ -162,12 +164,20 @@ MISSING_COMMANDS=($(printf '%s\n' "${MISSING_COMMANDS[@]}" 2>/dev/null | sort -u
 
 TOTAL=$(( ${#APT_PACKAGES[@]} + ${#PIP_PACKAGES[@]} + ${#NPM_PACKAGES[@]} ))
 
+array_to_json() {
+  if [[ $# -eq 0 ]]; then
+    echo "[]"
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s .
+  fi
+}
+
 if [[ "$OUTPUT_JSON" == "true" ]]; then
   # JSON output for programmatic use
-  apt_json=$(printf '%s\n' "${APT_PACKAGES[@]}" 2>/dev/null | jq -R . | jq -s . || echo "[]")
-  pip_json=$(printf '%s\n' "${PIP_PACKAGES[@]}" 2>/dev/null | jq -R . | jq -s . || echo "[]")
-  npm_json=$(printf '%s\n' "${NPM_PACKAGES[@]}" 2>/dev/null | jq -R . | jq -s . || echo "[]")
-  cmds_json=$(printf '%s\n' "${MISSING_COMMANDS[@]}" 2>/dev/null | jq -R . | jq -s . || echo "[]")
+  apt_json=$(array_to_json "${APT_PACKAGES[@]}")
+  pip_json=$(array_to_json "${PIP_PACKAGES[@]}")
+  npm_json=$(array_to_json "${NPM_PACKAGES[@]}")
+  cmds_json=$(array_to_json "${MISSING_COMMANDS[@]}")
   jq -n \
     --argjson apt "$apt_json" \
     --argjson pip "$pip_json" \
