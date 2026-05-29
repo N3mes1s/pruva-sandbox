@@ -18,3 +18,15 @@
  NOMAD_DIR="$ROOT/external/nomad"
  VULN_TAG="v2.0.0"
  FIXED_TAG="v2.0.1"
+@@ -40,2 +51,9 @@
+-git fetch --depth=100 origin tag "$VULN_TAG" 2>/dev/null || true
+-git fetch --depth=100 origin tag "$FIXED_TAG" 2>/dev/null || true
++ensure_tag() {
++    local tag="$1"
++    if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
++        git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
++    fi
++}
++
++ensure_tag "$VULN_TAG"
++ensure_tag "$FIXED_TAG"
