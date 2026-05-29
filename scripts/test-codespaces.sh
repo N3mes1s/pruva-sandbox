@@ -212,7 +212,7 @@ test_branch() {
   metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
   expected_image="${metadata_image:-$DEFAULT_SANDBOX_IMAGE}"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
-  docker_moby=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby // "unset"')
+  docker_moby=$(echo "$devcontainer" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
   if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
