@@ -76,14 +76,15 @@ jobs:
               CURRENT_ID=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.REPRO_ID // empty')
               CURRENT_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.image // empty')
               CURRENT_ENV_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
+              CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ] && { [ -z "$EXPECTED_IMAGE" ] || { [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; }; }; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && { [ -z "$EXPECTED_IMAGE" ] || { [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; }; }; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
               fi
 
-              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none})"
+              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, sshd: ${CURRENT_SSHD_VERSION:-missing})"
 
               # Checkout existing branch and fix it
               git fetch origin "$BRANCH:$BRANCH"
@@ -93,11 +94,11 @@ jobs:
               tmp_devcontainer=$(mktemp)
               if [ -n "$EXPECTED_IMAGE" ]; then
                 jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
-                  '.containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+                  '.features //= {} | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
                   .devcontainer/devcontainer.json > "$tmp_devcontainer"
               else
                 jq --arg repro_id "$REPRO_ID" \
-                  '.containerEnv.REPRO_ID = $repro_id' \
+                  '.features //= {} | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id' \
                   .devcontainer/devcontainer.json > "$tmp_devcontainer"
               fi
               mv "$tmp_devcontainer" .devcontainer/devcontainer.json
@@ -125,11 +126,11 @@ jobs:
             tmp_devcontainer=$(mktemp)
             if [ -n "$EXPECTED_IMAGE" ]; then
               jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
-                '.containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+                '.features //= {} | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
                 .devcontainer/devcontainer.json > "$tmp_devcontainer"
             else
               jq --arg repro_id "$REPRO_ID" \
-                '.containerEnv.REPRO_ID = $repro_id' \
+                '.features //= {} | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id' \
                 .devcontainer/devcontainer.json > "$tmp_devcontainer"
             fi
             mv "$tmp_devcontainer" .devcontainer/devcontainer.json

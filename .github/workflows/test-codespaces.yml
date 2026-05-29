@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       latest_count:
-        description: 'Number of latest repro branches to test'
+        description: 'Number of latest published reproductions to test'
         required: false
         default: '10'
       specific_repro:
@@ -69,10 +69,10 @@ jobs:
             echo "Testing specific repro: $SPECIFIC_REPRO"
             REPRO_IDS="$SPECIFIC_REPRO"
           else
-            echo "Finding latest $LATEST_COUNT repro branches..."
-            REPRO_IDS=$(git branch -r --sort=-committerdate \
-              | grep 'origin/repro/REPRO-' \
-              | sed 's|.*origin/repro/||' \
+            echo "Finding latest $LATEST_COUNT published reproductions from API..."
+            FETCH_LIMIT=$((LATEST_COUNT + 25))
+            REPRO_IDS=$(curl -fsS "$API_URL/reproductions?status=published&limit=$FETCH_LIMIT" \
+              | jq -r '.reproductions[]?.repro_id' \
               | xargs)
 
             # Filter out skipped repros
@@ -138,7 +138,7 @@ jobs:
       - name: Run branch validation
         run: |
           chmod +x scripts/test-codespaces.sh
-          ./scripts/test-codespaces.sh --latest ${{ inputs.latest_count || '10' }}
+          ./scripts/test-codespaces.sh --latest ${{ inputs.latest_count || '10' }} --api-url "$API_URL"
 
   # Job 3: Full Docker-based test (runs pruva-verify inside the container)
   test-in-container:
