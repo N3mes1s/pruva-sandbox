@@ -129,6 +129,10 @@ The test suite covers input validation, artifact path normalization, script sele
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 python3 scripts/test_codespaces_modal.py --latest 5
+
+# Test an immutable production candidate image
+PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
+  python3 scripts/test_codespaces_modal.py --latest 20
 ```
 
 ### Releasing a new binary
