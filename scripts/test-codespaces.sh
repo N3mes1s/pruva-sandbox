@@ -10,8 +10,8 @@
 #   4. The reproduction script is downloaded
 #
 # Usage:
-#   ./scripts/test-codespaces.sh                    # Test latest 10 branches
-#   ./scripts/test-codespaces.sh --latest 20        # Test latest 20 branches
+#   ./scripts/test-codespaces.sh                    # Test latest 10 published API reproductions
+#   ./scripts/test-codespaces.sh --latest 20        # Test latest 20 published API reproductions
 #   ./scripts/test-codespaces.sh --all              # Test ALL repro branches
 #   ./scripts/test-codespaces.sh --branch repro/REPRO-2026-00105  # Test one branch
 #
@@ -28,6 +28,7 @@ NC='\033[0m'
 
 API_URL="${PRUVA_API_URL:-https://pruva-api-production.up.railway.app/v1}"
 LATEST=10
+LATEST_SOURCE="api"
 TEST_ALL=false
 SINGLE_BRANCH=""
 DOWNLOAD_SCRIPT=true
@@ -40,7 +41,8 @@ ${BOLD}USAGE:${NC}
     ./scripts/test-codespaces.sh [OPTIONS]
 
 ${BOLD}OPTIONS:${NC}
-    --latest N         Test the N most recent repro branches (default: 10)
+    --latest N         Test the N latest published reproductions from the API (default: 10)
+    --branch-latest N  Test the N most recent repro branches by git committer date
     --all              Test ALL repro branches
     --branch NAME      Test a single branch (e.g. repro/REPRO-2026-00105)
     --no-download      Skip downloading the reproduction script (metadata only)
@@ -63,6 +65,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --latest)
       LATEST="$2"
+      LATEST_SOURCE="api"
+      shift 2
+      ;;
+    --branch-latest)
+      LATEST="$2"
+      LATEST_SOURCE="branches"
       shift 2
       ;;
     --all)
@@ -107,6 +115,20 @@ pass()    { echo -e "${GREEN}  ✓${NC} $*"; }
 fail()    { echo -e "${RED}  ✗${NC} $*"; }
 warn()    { echo -e "${YELLOW}  ⚠${NC} $*"; }
 section() { echo -e "\n${BOLD}$*${NC}"; }
+
+fetch_latest_api_repro_ids() {
+  local count="$1"
+  local tmp_meta http_code
+  tmp_meta=$(mktemp)
+  http_code=$(curl -sf -w "%{http_code}" -o "$tmp_meta" "${API_URL}/reproductions?status=published&limit=${count}" 2>/dev/null) || http_code="000"
+  if [[ "$http_code" != "200" ]]; then
+    rm -f "$tmp_meta"
+    echo "Failed to fetch latest reproductions from API (HTTP ${http_code})" >&2
+    return 1
+  fi
+  jq -r '.reproductions[]?.repro_id // empty' "$tmp_meta"
+  rm -f "$tmp_meta"
+}
 
 # Test a single branch
 test_branch() {
@@ -281,6 +303,9 @@ echo -e "${BOLD}  Codespace Readiness Test${NC}"
 echo -e "${BOLD}=========================================${NC}"
 echo -e "  API: ${API_URL}"
 echo -e "  Download scripts: ${DOWNLOAD_SCRIPT}"
+if [[ -z "$SINGLE_BRANCH" && "$TEST_ALL" != "true" ]]; then
+  echo -e "  Latest source: ${LATEST_SOURCE}"
+fi
 echo ""
 
 # Collect branches to test
@@ -298,10 +323,16 @@ elif [[ "$TEST_ALL" == "true" ]]; then
     BRANCHES+=("$(echo "$b" | xargs)")
   done < <(git branch -r --sort=-committerdate | grep 'origin/repro/' | xargs -n1)
 else
-  # Latest N repro branches
-  while IFS= read -r b; do
-    BRANCHES+=("$(echo "$b" | xargs)")
-  done < <(git branch -r --sort=-committerdate | grep 'origin/repro/' | head -n "$LATEST" | xargs -n1)
+  if [[ "$LATEST_SOURCE" == "api" ]]; then
+    while IFS= read -r repro_id; do
+      [[ -n "$repro_id" ]] && BRANCHES+=("origin/repro/${repro_id}")
+    done < <(fetch_latest_api_repro_ids "$LATEST")
+  else
+    # Latest N repro branches by branch commit date.
+    while IFS= read -r b; do
+      BRANCHES+=("$(echo "$b" | xargs)")
+    done < <(git branch -r --sort=-committerdate | grep 'origin/repro/' | head -n "$LATEST" | xargs -n1)
+  fi
 fi
 
 if [[ ${#BRANCHES[@]} -eq 0 ]]; then
