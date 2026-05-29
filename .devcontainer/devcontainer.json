@@ -1,6 +1,6 @@
 {
   "name": "Pruva Reproduction Environment",
-  "image": "ghcr.io/n3mes1s/pruva-sandbox:latest",
+  "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374",
   "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
@@ -26,7 +26,8 @@
   "remoteUser": "vscode",
   "containerEnv": {
     "PRUVA_SANDBOX": "true",
-    "PRUVA_API_URL": "https://pruva-api-production.up.railway.app/v1",
-    "REPRO_ID": "REPRO-2026-00140"
+    "PRUVA_API_URL": "https://api.pruva.dev/v1",
+    "REPRO_ID": "REPRO-2026-00140",
+    "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374"
   }
 }
