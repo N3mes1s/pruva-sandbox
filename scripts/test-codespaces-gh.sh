@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPO="N3mes1s/pruva-sandbox"
-API_URL="${PRUVA_API_URL:-https://pruva-api-production.up.railway.app/v1}"
+API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
 LATEST=0
 REPRO_IDS=()
 KEEP=false
