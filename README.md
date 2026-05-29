@@ -70,7 +70,7 @@ pruva-verify CVE-2025-1716
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PRUVA_API_URL` | `https://pruva-api-production.up.railway.app/v1` | API base URL |
+| `PRUVA_API_URL` | `https://api.pruva.dev/v1` | API base URL |
 | `PRUVA_KEEP_DIR` | `1` | Set to `0` to delete the work directory after verification |
 | `PRUVA_RESULTS_DIR` | `$HOME/pruva-results` | Override the results directory |
 | `PRUVA_SANDBOX` | — | Set to `true` to skip interactive confirmation |

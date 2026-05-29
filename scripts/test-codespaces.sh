@@ -26,7 +26,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-API_URL="${PRUVA_API_URL:-https://pruva-api-production.up.railway.app/v1}"
+API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
 DEFAULT_SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374}"
 LATEST=10
 LATEST_SOURCE="api"
@@ -205,7 +205,8 @@ test_branch() {
   pass "API metadata fetched (HTTP 200)"
 
   # Step 7: Check Codespaces image pinning and parity with reproduction metadata when available
-  local devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby sshd_version
+  devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
   metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
@@ -213,6 +214,13 @@ test_branch() {
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
   docker_moby=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby // "unset"')
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
+
+  if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
+    fail "PRUVA_API_URL mismatch: devcontainer has '${devcontainer_api_url:-empty}', expected '${API_URL}'"
+    errors=$((errors + 1))
+  else
+    pass "PRUVA_API_URL matches test API"
+  fi
 
   if [[ -z "$devcontainer_image" ]]; then
     fail "Codespaces image is missing"
