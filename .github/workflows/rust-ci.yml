@@ -1,0 +1,68 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pruva-verify-rs/**'
+  pull_request:
+    paths:
+      - 'pruva-verify-rs/**'
+
+defaults:
+  run:
+    working-directory: pruva-verify-rs
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            pruva-verify-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('pruva-verify-rs/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            pruva-verify-rs/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('pruva-verify-rs/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pruva-verify-x86_64-unknown-linux-gnu
+          path: pruva-verify-rs/target/release/pruva-verify

@@ -8,7 +8,7 @@
 #   pruva-verify CVE-2025-1716
 #
 # Environment:
-#   PRUVA_API_URL - API base URL (default: https://api.pruva.dev/v1)
+#   PRUVA_API_URL - API base URL (default: https://pruva-api-production.up.railway.app/v1)
 #   PRUVA_KEEP_DIR - Set to 1 to keep the temp directory after verification
 #
 set -euo pipefail
@@ -23,7 +23,7 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Config
-API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
+API_URL="${PRUVA_API_URL:-https://pruva-api-production.up.railway.app/v1}"
 KEEP_DIR="${PRUVA_KEEP_DIR:-1}"  # Keep results by default
 
 # In Codespaces, use workspace dir so files are visible in VS Code explorer
@@ -55,7 +55,7 @@ ${BOLD}EXAMPLES:${NC}
     pruva-verify CVE-2025-1716
 
 ${BOLD}ENVIRONMENT:${NC}
-    PRUVA_API_URL    API base URL (default: https://api.pruva.dev/v1)
+    PRUVA_API_URL    API base URL (default: https://pruva-api-production.up.railway.app/v1)
     PRUVA_KEEP_DIR   Set to 1 to keep temp directory after verification
 
 ${BOLD}OPTIONS:${NC}

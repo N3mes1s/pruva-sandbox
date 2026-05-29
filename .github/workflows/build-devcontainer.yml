@@ -6,6 +6,7 @@ on:
     paths:
       - '.devcontainer/**'
       - 'pruva-verify'
+      - 'pruva-verify-rs/**'
   workflow_dispatch:
 
 env:

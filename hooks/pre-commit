@@ -1,0 +1,44 @@
+#!/bin/bash
+# Pre-commit hook for pruva-verify-rs
+# Runs: cargo fmt --check, cargo clippy, cargo test
+#
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+RUST_DIR="pruva-verify-rs"
+
+# Only run if Rust files were changed
+if ! git diff --cached --name-only | grep -q "^${RUST_DIR}/"; then
+    exit 0
+fi
+
+echo "[pre-commit] Checking pruva-verify-rs..."
+
+cd "$RUST_DIR"
+
+echo "[pre-commit] Running cargo fmt --check..."
+if ! cargo fmt -- --check 2>&1; then
+    echo ""
+    echo "[pre-commit] FAILED: cargo fmt"
+    echo "Run 'cargo fmt' in $RUST_DIR to fix formatting."
+    exit 1
+fi
+
+echo "[pre-commit] Running cargo clippy..."
+if ! cargo clippy --all-targets --all-features -- -D warnings 2>&1; then
+    echo ""
+    echo "[pre-commit] FAILED: cargo clippy"
+    echo "Fix the clippy warnings above before committing."
+    exit 1
+fi
+
+echo "[pre-commit] Running cargo test..."
+if ! cargo test 2>&1; then
+    echo ""
+    echo "[pre-commit] FAILED: cargo test"
+    echo "Fix the failing tests before committing."
+    exit 1
+fi
+
+echo "[pre-commit] All checks passed."

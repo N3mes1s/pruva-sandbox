@@ -134,6 +134,14 @@ def _load_local_patch(repro_id: str) -> str:
     return ""
 
 
+async def _write_sandbox_file(sb, path: str, data: bytes | str, mode: str):
+    """Write a file into a Modal sandbox without passing content through argv."""
+    if "b" in mode:
+        await sb.filesystem.write_bytes.aio(data, path)
+    else:
+        await sb.filesystem.write_text.aio(data, path)
+
+
 # ── Core test logic ──
 
 async def run_single_test(client, app, image, repro_id: str) -> dict:
@@ -162,24 +170,24 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
             },
         )
 
-        # Inject latest pruva-verify from local repo (may be newer than Docker image)
-        local_verify = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pruva-verify")
+        # Inject latest pruva-verify from local repo (may be newer than Docker image).
+        # Prefer the Rust binary built from this branch; fall back to the legacy bash script.
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        rust_verify = os.path.join(repo_root, "pruva-verify-rs", "target", "release", "pruva-verify")
+        bash_verify = os.path.join(repo_root, "pruva-verify")
+        local_verify = rust_verify if os.path.isfile(rust_verify) else bash_verify
         if os.path.isfile(local_verify):
-            import base64 as _b64v
-            with open(local_verify) as fv:
-                encoded_verify = _b64v.b64encode(fv.read().encode()).decode()
-            inject_verify = await sb.exec.aio("bash", "-c",
-                f"echo '{encoded_verify}' | base64 -d > /usr/local/bin/pruva-verify && chmod +x /usr/local/bin/pruva-verify")
+            with open(local_verify, "rb") as fv:
+                await _write_sandbox_file(sb, "/usr/local/bin/pruva-verify", fv.read(), "wb")
+            inject_verify = await sb.exec.aio("chmod", "+x", "/usr/local/bin/pruva-verify")
             await inject_verify.wait.aio()
 
         # Inject patch file if available (pruva-verify will auto-apply it)
         patch_content = _load_local_patch(repro_id)
         if patch_content:
-            import base64 as _b64
-            encoded_patch = _b64.b64encode(patch_content.encode()).decode()
-            inject_patch = await sb.exec.aio("bash", "-c",
-                f"mkdir -p /tmp/repro-patches && echo '{encoded_patch}' | base64 -d > /tmp/repro-patches/{repro_id}.patch")
-            await inject_patch.wait.aio()
+            mkdir_patch = await sb.exec.aio("mkdir", "-p", "/tmp/repro-patches")
+            await mkdir_patch.wait.aio()
+            await _write_sandbox_file(sb, f"/tmp/repro-patches/{repro_id}.patch", patch_content, "w")
 
         proc = await sb.exec.aio("bash", "-c", f"pruva-verify {repro_id} 2>&1")
         stdout_lines = []
@@ -225,15 +233,24 @@ async def run_single_test(client, app, image, repro_id: str) -> dict:
 
 async def run_tests_parallel(ids: list[str], max_parallel: int = MAX_PARALLEL) -> list[dict]:
     """Run multiple tests in parallel using Modal sandboxes."""
-    import modal
-
     os.environ["MODAL_SERVER_URL"] = "https://api.modal.com"
 
     token_id = os.environ.get("MODAL_TOKEN_ID", "")
     token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
+    missing_setup = []
     if not token_id or not token_secret:
-        print("[error] MODAL_TOKEN_ID and MODAL_TOKEN_SECRET must be set", flush=True)
+        missing_setup.append("MODAL_TOKEN_ID and MODAL_TOKEN_SECRET must be set")
+
+    import importlib.util
+    if importlib.util.find_spec("modal") is None:
+        missing_setup.append("Python package 'modal' is not installed; run: pip install modal")
+
+    if missing_setup:
+        for item in missing_setup:
+            print(f"[error] {item}", flush=True)
         sys.exit(1)
+
+    import modal
 
     print("[modal] Connecting client...", flush=True)
     client = await modal.Client.from_credentials.aio(token_id, token_secret)
