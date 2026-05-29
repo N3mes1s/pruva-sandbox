@@ -80,7 +80,7 @@ jobs:
               CURRENT_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.image // empty')
               CURRENT_ENV_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
               CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
-              CURRENT_DOCKER_MOBY=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby // "unset"')
+              CURRENT_DOCKER_MOBY=$(echo "$CURRENT_DEVCONTAINER" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
 
               if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ "$CURRENT_DOCKER_MOBY" = "false" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; then
                 echo "SKIP: $BRANCH already configured correctly"
