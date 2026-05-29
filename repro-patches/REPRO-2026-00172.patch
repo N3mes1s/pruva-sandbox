@@ -1,0 +1,20 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -8,6 +8,17 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v autoreconf >/dev/null 2>&1; then
++    echo "[+] Installing autotools..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq autoconf automake libtool 2>&1 | tail -5
++fi
++
+ # Check for pre-installed wolfSSL builds
+ VULN_PREFIX="/tmp/wolfssl-vuln"
+ FIXED_PREFIX="/tmp/wolfssl-fixed"

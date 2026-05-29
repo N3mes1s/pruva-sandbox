@@ -48,8 +48,9 @@ OPTIONS:
     --ssh-timeout VALUE    Max time to wait for SSH in verify mode (default: ${SSH_TIMEOUT})
     --mode MODE            Test mode: available or verify (default: ${MODE}).
                            available waits for GitHub API state only, matching
-                           the web UI creation path. verify SSHes into the
-                           Codespace and runs pruva-verify.
+                           the web UI creation path. verify waits for the
+                           postCreateCommand pruva-verify result from the real
+                           Codespaces startup path.
     --keep                Keep created Codespaces for debugging.
     -h, --help            Show this help message.
 
@@ -209,9 +210,31 @@ wait_for_codespace_ssh() {
   return 1
 }
 
-verify_in_codespace() {
+wait_for_codespace_post_create() {
   local codespace="$1"
-  local repro_id="$2"
+  local deadline=$((SECONDS + 1800))
+  local logs
+  logs=$(mktemp)
+
+  while [[ $SECONDS -lt $deadline ]]; do
+    if gh codespace logs --codespace "$codespace" >"$logs" 2>/dev/null; then
+      if grep -q "Finished configuring codespace" "$logs"; then
+        rm -f "$logs"
+        return 0
+      fi
+    fi
+    log "Waiting for postCreateCommand in ${codespace}"
+    sleep 10
+  done
+
+  cat "$logs" >&2 || true
+  rm -f "$logs"
+  fail "Timed out waiting for postCreateCommand in Codespace ${codespace}"
+  return 1
+}
+
+check_environment_in_codespace() {
+  local codespace="$1"
   local remote_script quoted_script
 
   remote_script="set -euo pipefail
@@ -222,11 +245,46 @@ fi
 test -f /etc/pruva-sandbox-version
 command -v pruva-verify >/dev/null
 echo '== sandbox =='
-cat /etc/pruva-sandbox-version
-echo '== verify =='
-pruva-verify '${repro_id}'"
+cat /etc/pruva-sandbox-version"
   printf -v quoted_script "%q" "$remote_script"
   gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}"
+}
+
+verify_post_create_result() {
+  local codespace="$1"
+  local repro_id="$2"
+  local logs
+  logs=$(mktemp)
+
+  if ! gh codespace logs --codespace "$codespace" >"$logs"; then
+    rm -f "$logs"
+    fail "Could not fetch Codespace logs for ${codespace}"
+    return 1
+  fi
+
+  if ! grep -q "$repro_id" "$logs"; then
+    cat "$logs" >&2 || true
+    rm -f "$logs"
+    fail "postCreateCommand logs did not mention ${repro_id}"
+    return 1
+  fi
+
+  if grep -q "VERIFICATION SUCCESSFUL" "$logs"; then
+    rm -f "$logs"
+    return 0
+  fi
+
+  if grep -q "VERIFICATION FAILED" "$logs"; then
+    cat "$logs" >&2 || true
+    rm -f "$logs"
+    fail "postCreateCommand pruva-verify failed for ${repro_id}"
+    return 1
+  fi
+
+  cat "$logs" >&2 || true
+  rm -f "$logs"
+  fail "postCreateCommand logs did not include a terminal pruva-verify result for ${repro_id}"
+  return 1
 }
 
 test_one_repro() {
@@ -290,9 +348,21 @@ test_one_repro() {
         rm -f "$output_file"
         return 1
       fi
-      log "Running pruva-verify in ${codespace_name}"
-      if ! verify_in_codespace "$codespace_name" "$repro_id"; then
+      if ! wait_for_codespace_post_create "$codespace_name"; then
         gh codespace logs --codespace "$codespace_name" || true
+        delete_codespace "$codespace_name"
+        rm -f "$output_file"
+        return 1
+      fi
+      log "Checking Pruva environment in ${codespace_name}"
+      if ! check_environment_in_codespace "$codespace_name"; then
+        gh codespace logs --codespace "$codespace_name" || true
+        delete_codespace "$codespace_name"
+        rm -f "$output_file"
+        return 1
+      fi
+      log "Checking postCreateCommand pruva-verify result in ${codespace_name}"
+      if ! verify_post_create_result "$codespace_name" "$repro_id"; then
         delete_codespace "$codespace_name"
         rm -f "$output_file"
         return 1
