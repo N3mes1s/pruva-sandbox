@@ -94,7 +94,7 @@ Small script but has regex validation and URL formatting that should be verified
 |-------|--------------|
 | ID format validation regex | REPRO-YYYY-NNNNN, GHSA-xxxx-xxxx-xxxx, CVE-YYYY-NNNNN all accepted |
 | Invalid formats rejected | Random strings, partial matches, SQL injection attempts |
-| URL format | Output contains correct `codespaces.new` URL with proper env parameter |
+| URL format | Output contains correct Codespaces URL with `ref=repro/<REPRO_ID>` |
 | Markdown badge | Output contains valid markdown image link |
 
 ---
