@@ -12,7 +12,7 @@ The codebase has **zero unit tests**. All existing test infrastructure is integr
 | `scripts/test-codespaces.sh` | Integration | Validates repro branch configuration and API connectivity |
 | `scripts/detect-missing-deps.sh` | Utility | Analyzes failure logs (no tests for itself) |
 | `scripts/generate-codespace-url.sh` | Utility | Generates URLs (no tests for itself) |
-| `.github/workflows/test-codespaces.yml` | CI | Orchestrates Docker-based E2E runs |
+| `.github/workflows/test-codespaces.yml` | CI | Orchestrates branch validation, optional raw-container smoke tests, and optional real Codespaces runs |
 
 There is **no test framework configured** (no pytest, no bats, no shunit2), **no coverage tooling**, and **no unit tests for any individual function or script**.
 
