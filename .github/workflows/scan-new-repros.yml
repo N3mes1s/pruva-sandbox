@@ -66,30 +66,45 @@ jobs:
 
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
+            REPRO_JSON=$(curl -sf "$API_URL/reproductions/$REPRO_ID" || echo "{}")
+            EXPECTED_IMAGE=$(echo "$REPRO_JSON" | jq -r '.environment.sandbox_image // empty')
 
             # Check if branch exists and if it's properly configured
             if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
-              # Branch exists - check if REPRO_ID is set correctly
-              CURRENT_ID=$(curl -sf "https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/$BRANCH/.devcontainer/devcontainer.json" | grep '"REPRO_ID"' | grep -o 'REPRO-[0-9]\{4\}-[0-9]\{5\}' || echo "")
+              # Branch exists - check if REPRO_ID and sandbox image are set correctly
+              CURRENT_DEVCONTAINER=$(curl -sf "https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/$BRANCH/.devcontainer/devcontainer.json" || echo "{}")
+              CURRENT_ID=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.REPRO_ID // empty')
+              CURRENT_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.image // empty')
+              CURRENT_ENV_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ]; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && { [ -z "$EXPECTED_IMAGE" ] || { [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; }; }; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
               fi
 
-              echo "FIX: $BRANCH (current: ${CURRENT_ID:-empty}, expected: $REPRO_ID)"
+              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none})"
 
               # Checkout existing branch and fix it
               git fetch origin "$BRANCH:$BRANCH"
               git checkout "$BRANCH"
 
-              # Update devcontainer.json to set correct REPRO_ID
-              sed -i "s/\"REPRO_ID\": \"[^\"]*\"/\"REPRO_ID\": \"$REPRO_ID\"/" .devcontainer/devcontainer.json
+              # Update devcontainer.json to set correct REPRO_ID and pinned image when API metadata has one
+              tmp_devcontainer=$(mktemp)
+              if [ -n "$EXPECTED_IMAGE" ]; then
+                jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
+                  '.containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+                  .devcontainer/devcontainer.json > "$tmp_devcontainer"
+              else
+                jq --arg repro_id "$REPRO_ID" \
+                  '.containerEnv.REPRO_ID = $repro_id' \
+                  .devcontainer/devcontainer.json > "$tmp_devcontainer"
+              fi
+              mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 
               # Commit and force-push fix
               git add .devcontainer/devcontainer.json
-              git commit -m "fix: set REPRO_ID=$REPRO_ID for this branch" \
+              git commit -m "fix: configure Codespace for $REPRO_ID" \
                 -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
               git push --force-with-lease origin "$BRANCH"
 
@@ -106,12 +121,22 @@ jobs:
             # Create branch from main
             git checkout -b "$BRANCH" origin/main
 
-            # Update devcontainer.json to set REPRO_ID
-            sed -i "s/\"REPRO_ID\": \"\"/\"REPRO_ID\": \"$REPRO_ID\"/" .devcontainer/devcontainer.json
+            # Update devcontainer.json to set REPRO_ID and pinned image when API metadata has one
+            tmp_devcontainer=$(mktemp)
+            if [ -n "$EXPECTED_IMAGE" ]; then
+              jq --arg repro_id "$REPRO_ID" --arg image "$EXPECTED_IMAGE" \
+                '.containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+                .devcontainer/devcontainer.json > "$tmp_devcontainer"
+            else
+              jq --arg repro_id "$REPRO_ID" \
+                '.containerEnv.REPRO_ID = $repro_id' \
+                .devcontainer/devcontainer.json > "$tmp_devcontainer"
+            fi
+            mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 
             # Commit changes
             git add .devcontainer/devcontainer.json
-            git commit -m "chore: set REPRO_ID=$REPRO_ID for this branch" \
+            git commit -m "chore: configure Codespace for $REPRO_ID" \
               -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
 
             # Push branch
