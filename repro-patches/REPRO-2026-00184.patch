@@ -1,0 +1,15 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -7,6 +7,12 @@
+ mkdir -p "$LOGS"
+ mkdir -p "$REPRO_DIR"
+ 
++if ! command -v go >/dev/null 2>&1; then
++    echo "[+] Installing Go..."
++    sudo apt-get update -qq
++    sudo apt-get install -y -qq golang-go 2>&1 | tail -5
++fi
++
+ REPO_DIR="$ROOT/external/temporal"
+ SERVER_BIN="$REPO_DIR/temporal-server"
+ REPRO_GO="$REPO_DIR/repro_main.go"
