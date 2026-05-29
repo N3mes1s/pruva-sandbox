@@ -27,6 +27,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 API_URL="${PRUVA_API_URL:-https://pruva-api-production.up.railway.app/v1}"
+DEFAULT_SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374}"
 LATEST=10
 LATEST_SOURCE="api"
 TEST_ALL=false
@@ -53,7 +54,7 @@ ${BOLD}WHAT IT VALIDATES:${NC}
     1. Branch has a valid devcontainer.json
     2. devcontainer.json contains a non-empty REPRO_ID
     3. REPRO_ID in devcontainer.json matches the branch name
-    4. devcontainer image matches metadata.environment.sandbox_image when present
+    4. devcontainer image matches metadata.environment.sandbox_image, or the pinned default when metadata is absent
     5. Pruva API returns metadata for the REPRO_ID
     6. Metadata contains a reproduction_script artifact
     7. The reproduction script is downloadable and non-empty
@@ -203,24 +204,56 @@ test_branch() {
   fi
   pass "API metadata fetched (HTTP 200)"
 
-  # Step 7: Check Codespaces image parity with reproduction metadata when available
-  local devcontainer_image expected_image sandbox_version
+  # Step 7: Check Codespaces image pinning and parity with reproduction metadata when available
+  local devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby sshd_version
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
-  expected_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
+  devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
+  metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
+  expected_image="${metadata_image:-$DEFAULT_SANDBOX_IMAGE}"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
+  docker_moby=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby // "unset"')
+  sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
-  if [[ -n "$expected_image" ]]; then
-    if [[ "$devcontainer_image" != "$expected_image" ]]; then
-      fail "Codespaces image mismatch: devcontainer has '${devcontainer_image:-empty}', metadata expects '${expected_image}'"
-      errors=$((errors + 1))
-    else
-      pass "Codespaces image matches metadata sandbox_image"
-    fi
-  elif [[ -n "$sandbox_version" ]]; then
-    warn "Metadata has sandbox_version=${sandbox_version} but no sandbox_image; branch image parity cannot be proven"
-    warnings=$((warnings + 1))
+  if [[ -z "$devcontainer_image" ]]; then
+    fail "Codespaces image is missing"
+    errors=$((errors + 1))
+  elif [[ "$devcontainer_image" == *":latest" ]]; then
+    fail "Codespaces image must be immutable; found '${devcontainer_image}'"
+    errors=$((errors + 1))
+  elif [[ "$devcontainer_image" != "$expected_image" ]]; then
+    fail "Codespaces image mismatch: devcontainer has '${devcontainer_image}', expected '${expected_image}'"
+    errors=$((errors + 1))
   else
-    warn "Metadata has no sandbox environment block; branch image parity cannot be proven"
+    if [[ -n "$metadata_image" ]]; then
+      pass "Codespaces image matches metadata sandbox_image"
+    else
+      pass "Codespaces image uses pinned default sandbox image"
+    fi
+  fi
+
+  if [[ "$devcontainer_env_image" != "$devcontainer_image" ]]; then
+    fail "PRUVA_SANDBOX_IMAGE env mismatch: env has '${devcontainer_env_image:-empty}', image has '${devcontainer_image:-empty}'"
+    errors=$((errors + 1))
+  else
+    pass "PRUVA_SANDBOX_IMAGE matches devcontainer image"
+  fi
+
+  if [[ "$docker_moby" != "false" ]]; then
+    fail "docker-outside-of-docker feature must set moby=false for Codespaces compatibility; found '${docker_moby}'"
+    errors=$((errors + 1))
+  else
+    pass "docker-outside-of-docker moby=false"
+  fi
+
+  if [[ "$sshd_version" != "latest" ]]; then
+    fail "sshd feature version must be latest; found '${sshd_version:-missing}'"
+    errors=$((errors + 1))
+  else
+    pass "sshd feature enabled"
+  fi
+
+  if [[ -z "$metadata_image" && -n "$sandbox_version" ]]; then
+    warn "Metadata has sandbox_version=${sandbox_version} but no sandbox_image; using pinned default for this branch"
     warnings=$((warnings + 1))
   fi
 
@@ -302,6 +335,7 @@ echo -e "${BOLD}=========================================${NC}"
 echo -e "${BOLD}  Codespace Readiness Test${NC}"
 echo -e "${BOLD}=========================================${NC}"
 echo -e "  API: ${API_URL}"
+echo -e "  Default sandbox image: ${DEFAULT_SANDBOX_IMAGE}"
 echo -e "  Download scripts: ${DOWNLOAD_SCRIPT}"
 if [[ -z "$SINGLE_BRANCH" && "$TEST_ALL" != "true" ]]; then
   echo -e "  Latest source: ${LATEST_SOURCE}"
