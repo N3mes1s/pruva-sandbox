@@ -5,8 +5,9 @@
 #
 # This simulates what happens when a Codespace starts:
 #   1. devcontainer.json is read for REPRO_ID
-#   2. pruva-verify fetches metadata from the API
-#   3. The reproduction script is downloaded
+#   2. devcontainer image is checked against API sandbox metadata, when present
+#   3. pruva-verify fetches metadata from the API
+#   4. The reproduction script is downloaded
 #
 # Usage:
 #   ./scripts/test-codespaces.sh                    # Test latest 10 branches
@@ -50,9 +51,10 @@ ${BOLD}WHAT IT VALIDATES:${NC}
     1. Branch has a valid devcontainer.json
     2. devcontainer.json contains a non-empty REPRO_ID
     3. REPRO_ID in devcontainer.json matches the branch name
-    4. Pruva API returns metadata for the REPRO_ID
-    5. Metadata contains a reproduction_script artifact
-    6. The reproduction script is downloadable and non-empty
+    4. devcontainer image matches metadata.environment.sandbox_image when present
+    5. Pruva API returns metadata for the REPRO_ID
+    6. Metadata contains a reproduction_script artifact
+    7. The reproduction script is downloadable and non-empty
 EOF
 }
 
@@ -179,7 +181,28 @@ test_branch() {
   fi
   pass "API metadata fetched (HTTP 200)"
 
-  # Step 7: Check metadata has required fields
+  # Step 7: Check Codespaces image parity with reproduction metadata when available
+  local devcontainer_image expected_image sandbox_version
+  devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
+  expected_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
+  sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
+
+  if [[ -n "$expected_image" ]]; then
+    if [[ "$devcontainer_image" != "$expected_image" ]]; then
+      fail "Codespaces image mismatch: devcontainer has '${devcontainer_image:-empty}', metadata expects '${expected_image}'"
+      errors=$((errors + 1))
+    else
+      pass "Codespaces image matches metadata sandbox_image"
+    fi
+  elif [[ -n "$sandbox_version" ]]; then
+    warn "Metadata has sandbox_version=${sandbox_version} but no sandbox_image; branch image parity cannot be proven"
+    warnings=$((warnings + 1))
+  else
+    warn "Metadata has no sandbox environment block; branch image parity cannot be proven"
+    warnings=$((warnings + 1))
+  fi
+
+  # Step 8: Check metadata has required fields
   local title status
   title=$(echo "$metadata" | jq -r '.title // empty')
   status=$(echo "$metadata" | jq -r '.status // empty')
@@ -198,7 +221,7 @@ test_branch() {
     pass "Status: published"
   fi
 
-  # Step 8: Find the reproduction script artifact
+  # Step 9: Find the reproduction script artifact
   local script_path
   script_path=$(echo "$metadata" | jq -r '
     if .reproduction_script then
@@ -216,7 +239,7 @@ test_branch() {
   fi
   pass "Reproduction script: ${script_path}"
 
-  # Step 9: Download the reproduction script
+  # Step 10: Download the reproduction script
   if [[ "$DOWNLOAD_SCRIPT" == "true" ]]; then
     local script_url="${API_URL}/reproductions/${repro_id}/artifacts/${script_path}"
     local tmp_script
