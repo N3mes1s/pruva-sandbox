@@ -99,6 +99,7 @@ pruva-verify CVE-2025-1716
 ├── scripts/
 │   ├── test-codespaces.sh      # Branch validation (devcontainer, API, artifacts)
 │   ├── test_codespaces_modal.py# Full E2E tests via Modal sandboxes
+│   ├── test-production-parity.sh# pruva/Codespaces/Modal sandbox parity gate
 │   ├── detect-missing-deps.sh  # Failure log analysis for missing packages
 │   ├── generate-codespace-url.sh
 │   └── sandbox_shell.py        # Interactive Modal sandbox shell
@@ -147,6 +148,13 @@ python3 scripts/test_codespaces_modal.py --latest 5
 # Test an immutable production candidate image
 PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
   python3 scripts/test_codespaces_modal.py --latest 20
+
+# Production parity gate: checks pruva's pinned worker image contract,
+# latest-20 Codespaces readiness, and Modal smoke when credentials are present.
+./scripts/test-production-parity.sh
+
+# Require Modal for the production gate.
+./scripts/test-production-parity.sh --require-modal --modal-repro-ids REPRO-2026-00185
 ```
 
 ### Releasing a new binary
