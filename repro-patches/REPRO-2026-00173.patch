@@ -1,0 +1,117 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -10,13 +10,41 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v autoreconf >/dev/null 2>&1 || ! command -v libtoolize >/dev/null 2>&1; then
++    echo "[+] Installing autotools..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq autoconf automake libtool 2>&1 | tail -5
++fi
++
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/wolfssl-eccsi-v5.9.0-v5.9.1-$(uname -m)-1"
++    SOURCE_ROOT="$CACHE_DIR/src"
++    VULN_PREFIX="$CACHE_DIR/wolfssl-vuln"
++    FIXED_PREFIX="$CACHE_DIR/wolfssl-fixed"
++    VULN_FORGE="$CACHE_DIR/forge-vuln"
++    FIXED_FORGE="$CACHE_DIR/forge-fixed"
++    mkdir -p "$SOURCE_ROOT"
++    echo "[+] Using wolfSSL setup cache: $CACHE_DIR"
++else
++    SOURCE_ROOT="$ROOT/external"
++    VULN_PREFIX="/tmp/wolfssl-vuln"
++    FIXED_PREFIX="/tmp/wolfssl-fixed"
++    VULN_FORGE="/tmp/forge-vuln"
++    FIXED_FORGE="/tmp/forge-fixed"
++fi
++
+ # Clean up previous builds
+-rm -rf /tmp/wolfssl-vuln /tmp/wolfssl-fixed /tmp/forge-vuln /tmp/forge-fixed
++rm -f "$VULN_FORGE" "$FIXED_FORGE"
+ 
+ # Clone wolfSSL if not already present
+-WOLFSSL_DIR="$ROOT/external/wolfssl"
++WOLFSSL_DIR="$SOURCE_ROOT/wolfssl"
+ if [ ! -d "$WOLFSSL_DIR/.git" ]; then
+-    mkdir -p "$ROOT/external"
++    mkdir -p "$SOURCE_ROOT"
+     git clone --depth=100 https://github.com/wolfSSL/wolfssl.git "$WOLFSSL_DIR"
+ fi
+ 
+@@ -23,37 +51,45 @@
+ echo "=== Building vulnerable wolfSSL v5.9.0-stable ==="
+ cd "$WOLFSSL_DIR"
+-git clean -fdx || true
+-git checkout v5.9.0-stable
+-./autogen.sh >/dev/null 2>&1
+-./configure --enable-eccsi --enable-ecc --enable-sha256 \
+-    --disable-shared --enable-static --enable-debug \
+-    --prefix=/tmp/wolfssl-vuln >/dev/null 2>&1
+-make -j"$(nproc)" >/dev/null 2>&1
+-make install >/dev/null 2>&1
++if [ ! -f "$VULN_PREFIX/lib/libwolfssl.a" ]; then
++    git clean -fdx || true
++    git checkout v5.9.0-stable
++    ./autogen.sh >/dev/null 2>&1
++    ./configure --enable-eccsi --enable-ecc --enable-sha256 \
++        --disable-shared --enable-static --enable-debug \
++        --prefix="$VULN_PREFIX" >/dev/null 2>&1
++    make -j"$(nproc)" >/dev/null 2>&1
++    make install >/dev/null 2>&1
++else
++    echo "=== Reusing cached vulnerable wolfSSL ==="
++fi
+ 
+ echo "=== Building fixed wolfSSL v5.9.1-stable ==="
+ cd "$WOLFSSL_DIR"
+-git clean -fdx || true
+-git checkout v5.9.1-stable
+-./autogen.sh >/dev/null 2>&1
+-./configure --enable-eccsi --enable-ecc --enable-sha256 \
+-    --disable-shared --enable-static --enable-debug \
+-    --prefix=/tmp/wolfssl-fixed >/dev/null 2>&1
+-make -j"$(nproc)" >/dev/null 2>&1
+-make install >/dev/null 2>&1
++if [ ! -f "$FIXED_PREFIX/lib/libwolfssl.a" ]; then
++    git clean -fdx || true
++    git checkout v5.9.1-stable
++    ./autogen.sh >/dev/null 2>&1
++    ./configure --enable-eccsi --enable-ecc --enable-sha256 \
++        --disable-shared --enable-static --enable-debug \
++        --prefix="$FIXED_PREFIX" >/dev/null 2>&1
++    make -j"$(nproc)" >/dev/null 2>&1
++    make install >/dev/null 2>&1
++else
++    echo "=== Reusing cached fixed wolfSSL ==="
++fi
+ 
+ echo "=== Compiling forgery harness against vulnerable lib ==="
+-gcc -o /tmp/forge-vuln "$REPRO/eccsi_forge.c" \
+-    -I/tmp/wolfssl-vuln/include -L/tmp/wolfssl-vuln/lib \
+-    -lwolfssl -lm -Wl,-rpath,/tmp/wolfssl-vuln/lib
++gcc -o "$VULN_FORGE" "$REPRO/eccsi_forge.c" \
++    -I"$VULN_PREFIX/include" -L"$VULN_PREFIX/lib" \
++    -lwolfssl -lm -Wl,-rpath,"$VULN_PREFIX/lib"
+ 
+ echo "=== Compiling forgery harness against fixed lib ==="
+-gcc -o /tmp/forge-fixed "$REPRO/eccsi_forge.c" \
+-    -I/tmp/wolfssl-fixed/include -L/tmp/wolfssl-fixed/lib \
+-    -lwolfssl -lm -Wl,-rpath,/tmp/wolfssl-fixed/lib
++gcc -o "$FIXED_FORGE" "$REPRO/eccsi_forge.c" \
++    -I"$FIXED_PREFIX/include" -L"$FIXED_PREFIX/lib" \
++    -lwolfssl -lm -Wl,-rpath,"$FIXED_PREFIX/lib"
+ 
+ echo "=== Running against vulnerable wolfSSL ==="
+-/tmp/forge-vuln > "$LOGS/vulnerable_forge.txt" 2>&1 || true
++"$VULN_FORGE" > "$LOGS/vulnerable_forge.txt" 2>&1 || true
+ 
+ echo "=== Running against fixed wolfSSL ==="
+-/tmp/forge-fixed > "$LOGS/fixed_forge.txt" 2>&1 || true
++"$FIXED_FORGE" > "$LOGS/fixed_forge.txt" 2>&1 || true

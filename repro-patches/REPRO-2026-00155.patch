@@ -1,0 +1,47 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -6,6 +6,25 @@
+ LOGS="$ROOT/logs"
+ mkdir -p "$LOGS"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
++    echo "[+] Installing Rust/Cargo..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq rustc cargo 2>&1 | tail -5
++fi
++
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/gix-fs-0.21.0-0.21.1-$(uname -m)-1"
++    mkdir -p "$CACHE_DIR/cargo-home" "$CACHE_DIR/target"
++    export CARGO_HOME="$CACHE_DIR/cargo-home"
++    export CARGO_TARGET_DIR="$CACHE_DIR/target"
++    echo "[+] Using Rust setup cache: $CACHE_DIR"
++fi
++
+ REPRO_CRATE="$ROOT/repro_crate"
+ WORKTREE_DIR="$REPRO_CRATE/worktree"
+ FORBIDDEN_DIR="$REPRO_CRATE/forbidden"
+@@ -20,6 +39,7 @@
+ if [[ ! -f "$PATCHED_HASH/src/lib.rs" ]]; then
+     mkdir -p "$PATCHED_HASH"
+-    REGISTRY_HASH="$(find ~/.cargo/registry/src -name 'gix-hash-0.25.0' -type d 2>/dev/null | head -1 || true)"
++    REGISTRY_ROOT="${CARGO_HOME:-$HOME/.cargo}/registry/src"
++    REGISTRY_HASH="$(find "$REGISTRY_ROOT" -name 'gix-hash-0.25.0' -type d 2>/dev/null | head -1 || true)"
+     if [[ -n "$REGISTRY_HASH" && -d "$REGISTRY_HASH" ]]; then
+         cp -r "$REGISTRY_HASH/"* "$PATCHED_HASH/"
+     else
+@@ -34,7 +54,8 @@
+ gix-hash = "=0.25.0"
+ HEOF
+         (cd /tmp/_hash_fetch && cargo fetch 2>/dev/null)
+-        REGISTRY_HASH="$(find ~/.cargo/registry/src -name 'gix-hash-0.25.0' -type d 2>/dev/null | head -1)"
++        REGISTRY_HASH="$(find "$REGISTRY_ROOT" -name 'gix-hash-0.25.0' -type d 2>/dev/null | head -1)"
++        [[ -n "$REGISTRY_HASH" ]] || { echo "ERROR: gix-hash 0.25.0 was not fetched"; exit 1; }
+         cp -r "$REGISTRY_HASH/"* "$PATCHED_HASH/"
+     fi
+ 

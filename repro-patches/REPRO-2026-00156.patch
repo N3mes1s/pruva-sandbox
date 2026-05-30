@@ -1,0 +1,20 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -9,6 +9,17 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v php >/dev/null 2>&1; then
++    echo "[+] Installing PHP..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq php-cli 2>&1 | tail -5
++fi
++
+ REPO="$ROOT/yii2-repo"
+ SAFE_FILE="$ROOT/views/safe.php"
+ SECRET_FILE="$ROOT/views/secret.txt"

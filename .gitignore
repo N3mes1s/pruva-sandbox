@@ -1,5 +1,6 @@
 # Reproduction results (created by pruva-verify)
 pruva-results/
+.pruva-repro-cache/
 
 # OS files
 .DS_Store

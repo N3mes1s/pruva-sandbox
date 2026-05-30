@@ -1,0 +1,46 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -7,15 +7,27 @@
+ REPRO="$ROOT/repro"
+ mkdir -p "$LOGS"
+ 
+-EXTERNAL="$ROOT/external"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    EXTERNAL="${PRUVA_REPRO_CACHE_DIR}/jq-1.8.1-e47e56d-asan-$(uname -m)-1"
++    echo "[*] Using jq setup cache: $EXTERNAL"
++else
++    EXTERNAL="$ROOT/external"
++fi
+ JQ_DIR="$EXTERNAL/jq"
+ VULN_BIN="$EXTERNAL/jq-vuln"
+ FIXED_BIN="$EXTERNAL/jq-fixed"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
+ # Install dependencies
+-echo "[*] Installing build dependencies..."
+-apt-get update -qq >/dev/null 2>&1 || true
+-apt-get install -y -qq git gcc make autoconf automake libtool 2>/dev/null || true
++if ! command -v autoreconf >/dev/null 2>&1; then
++    echo "[*] Installing build dependencies..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq git gcc make autoconf automake libtool 2>&1 | tail -5
++fi
+ command -v autoreconf >/dev/null 2>&1 || { echo "ERROR: autoreconf not found"; exit 1; }
+ 
+ # Clone jq if not present
+@@ -33,6 +45,11 @@
+     local checkout_ref="$1"
+     local output_bin="$2"
+     
++    if [ -x "$output_bin" ]; then
++        echo "[*] Reusing cached $output_bin"
++        return
++    fi
++
+     cd "$JQ_DIR"
+     git clean -fdx
+     git checkout "$checkout_ref"
