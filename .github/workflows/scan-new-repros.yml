@@ -48,6 +48,8 @@ jobs:
         run: |
           echo "Fetching reproductions from $API_URL..."
           echo "Default sandbox image: $DEFAULT_SANDBOX_IMAGE"
+          REPRO_CACHE_DIR="/workspaces/pruva-sandbox/.pruva-repro-cache"
+          DOCKER_API_VERSION="1.43"
 
           # Fetch all reproductions (paginated)
           REPROS=$(curl -sf "$API_URL/reproductions?status=published&limit=1000" | jq -r '.reproductions[].repro_id')
@@ -79,16 +81,18 @@ jobs:
               CURRENT_API_URL=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_API_URL // empty')
               CURRENT_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.image // empty')
               CURRENT_ENV_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
+              CURRENT_REPRO_CACHE_DIR=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_REPRO_CACHE_DIR // empty')
+              CURRENT_DOCKER_API_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.DOCKER_API_VERSION // empty')
               CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
               CURRENT_DOCKER_MOBY=$(echo "$CURRENT_DEVCONTAINER" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ "$CURRENT_DOCKER_MOBY" = "false" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ]; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ "$CURRENT_DOCKER_MOBY" = "false" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_REPRO_CACHE_DIR" = "$REPRO_CACHE_DIR" ] && [ "$CURRENT_DOCKER_API_VERSION" = "$DOCKER_API_VERSION" ]; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
               fi
 
-              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker moby: ${CURRENT_DOCKER_MOBY:-unset})"
+              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, cache: ${CURRENT_REPRO_CACHE_DIR:-missing}, docker api: ${CURRENT_DOCKER_API_VERSION:-missing}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker moby: ${CURRENT_DOCKER_MOBY:-unset})"
 
               # Checkout existing branch and fix it
               git fetch origin "$BRANCH:$BRANCH"
@@ -98,8 +102,8 @@ jobs:
               # Prefer the image that the worker recorded; fall back to the production default
               # so older API records do not keep Codespaces on :latest.
               tmp_devcontainer=$(mktemp)
-              jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" \
-                '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+              jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" --arg cache_dir "$REPRO_CACHE_DIR" --arg docker_api "$DOCKER_API_VERSION" \
+                '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .containerEnv.PRUVA_REPRO_CACHE_DIR = $cache_dir | .containerEnv.DOCKER_API_VERSION = $docker_api | .image = $image' \
                 .devcontainer/devcontainer.json > "$tmp_devcontainer"
               mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 
@@ -124,8 +128,8 @@ jobs:
 
             # Update devcontainer.json to set REPRO_ID and pinned image.
             tmp_devcontainer=$(mktemp)
-            jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" \
-              '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .image = $image' \
+            jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" --arg cache_dir "$REPRO_CACHE_DIR" --arg docker_api "$DOCKER_API_VERSION" \
+              '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .containerEnv.PRUVA_REPRO_CACHE_DIR = $cache_dir | .containerEnv.DOCKER_API_VERSION = $docker_api | .image = $image' \
               .devcontainer/devcontainer.json > "$tmp_devcontainer"
             mv "$tmp_devcontainer" .devcontainer/devcontainer.json
 

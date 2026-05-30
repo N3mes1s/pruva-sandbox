@@ -1,0 +1,11 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -6,6 +6,8 @@
+ mkdir -p "$LOGS"
+ 
+ cd "$ROOT"
++
++export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
+ 
+ # Cleanup on exit
+ cleanup() {

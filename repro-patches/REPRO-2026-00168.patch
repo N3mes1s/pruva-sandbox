@@ -1,0 +1,11 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -7,6 +7,8 @@
+ 
+ cd "$ROOT"
+ 
++export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
++
+ # Images
+ FULL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ NO_XPACK_IMAGE="dataease:v2.10.21-no-xpack"

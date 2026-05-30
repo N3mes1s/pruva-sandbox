@@ -1,0 +1,35 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -10,11 +10,31 @@
+ 
+ cd "$ROOT"
+ 
++export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
++
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v java >/dev/null 2>&1 || ! command -v javac >/dev/null 2>&1; then
++    echo "[+] Installing Java..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq default-jdk-headless 2>&1 | tail -5
++fi
++
+ # Configuration
+ VULNERABLE_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.20"
+ FIXED_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
+-YSOSERIAL_JAR="/tmp/ysoserial.jar"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    YSOSERIAL_CACHE="${PRUVA_REPRO_CACHE_DIR}/ysoserial-master-snapshot-1"
++    mkdir -p "$YSOSERIAL_CACHE"
++    YSOSERIAL_JAR="$YSOSERIAL_CACHE/ysoserial.jar"
++    echo "[+] Using ysoserial cache: $YSOSERIAL_CACHE"
++else
++    YSOSERIAL_JAR="/tmp/ysoserial.jar"
++fi
+ PAYLOAD_BIN="/tmp/payload-cc6-repro.bin"
+ MARKER="/tmp/pruva-cve-2026-40901.txt"
+ 

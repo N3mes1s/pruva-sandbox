@@ -1,0 +1,33 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -10,8 +10,29 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v go >/dev/null 2>&1; then
++    echo "[+] Installing Go..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq golang-go 2>&1 | tail -5
++fi
++
+ # Create scratch Go module directory
+-SCRATCH="$ROOT/scratch_cache_repro"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/fiber-v3.1.0-v3.2.0-$(uname -m)-1"
++    mkdir -p "$CACHE_DIR/go-build" "$CACHE_DIR/go-mod"
++    export GOCACHE="$CACHE_DIR/go-build"
++    export GOMODCACHE="$CACHE_DIR/go-mod"
++    SCRATCH="$CACHE_DIR/scratch_cache_repro"
++    echo "[+] Using Go setup cache: $CACHE_DIR"
++else
++    SCRATCH="$ROOT/scratch_cache_repro"
++fi
++
+ rm -rf "$SCRATCH"
+ mkdir -p "$SCRATCH"
+ cd "$SCRATCH"

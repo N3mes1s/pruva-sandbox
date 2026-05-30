@@ -1,0 +1,41 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -10,6 +10,17 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v php >/dev/null 2>&1 || ! command -v composer >/dev/null 2>&1; then
++    echo "[+] Installing PHP/Composer..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq php-cli php-curl php-mbstring php-xml php-zip composer 2>&1 | tail -5
++fi
++
+ # Clean up previous runs
+ rm -rf "$ROOT/vulnerable" "$ROOT/fixed"
+ mkdir -p "$ROOT/vulnerable"
+@@ -18,16 +29,18 @@
+ # Install vulnerable version (3.25.0)
+ echo "Installing vulnerable version..."
+ (
+   cd "$ROOT/vulnerable"
+-  COMPOSER_ALLOW_SUPERUSER=1 composer require twig/twig:3.25.0 --no-interaction 2>&1 | tee "$LOGS/composer_vulnerable.log"
++  COMPOSER_ALLOW_SUPERUSER=1 composer config --global audit.block-insecure false >/dev/null 2>&1 || true
++  COMPOSER_ALLOW_SUPERUSER=1 composer require twig/twig:3.25.0 --no-audit --no-interaction 2>&1 | tee "$LOGS/composer_vulnerable.log"
+ )
+ 
+ # Install fixed version (3.26.0)
+ echo "Installing fixed version..."
+ (
+   cd "$ROOT/fixed"
+-  COMPOSER_ALLOW_SUPERUSER=1 composer require twig/twig:3.26.0 --no-interaction 2>&1 | tee "$LOGS/composer_fixed.log"
++  COMPOSER_ALLOW_SUPERUSER=1 composer config --global audit.block-insecure false >/dev/null 2>&1 || true
++  COMPOSER_ALLOW_SUPERUSER=1 composer require twig/twig:3.26.0 --no-audit --no-interaction 2>&1 | tee "$LOGS/composer_fixed.log"
+ )
+ 
+ # Create the test PHP script for vulnerable version
+ cat > "$ROOT/vulnerable/test.php" <<'PHPEOF'
