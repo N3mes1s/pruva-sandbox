@@ -1,11 +1,20 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -7,6 +7,8 @@
- 
- cd "$ROOT"
- 
+@@ -10,0 +11,2 @@
 +export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
 +
- # Images
- FULL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
- NO_XPACK_IMAGE="dataease:v2.10.21-no-xpack"
+@@ -24,0 +27 @@
++chmod -R a+rwX "$DATA_DIR"
+@@ -105 +108 @@
+-  local max_wait=${2:-180}
++  local max_wait=${2:-420}
+@@ -109 +112 @@
+-    code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
++    code=$(curl --max-time 5 -s -o /dev/null -w "%{http_code}" "$url" || true)
+@@ -117,0 +121 @@
++  docker logs dataease --tail 200 > "$LOGS/dataease_startup_fail.log" 2>&1 || true
+@@ -175,2 +179,2 @@
+-  # Wait for app
+-  wait_for_app "http://127.0.0.1:$DE_PORT/de2api/user/personInfo" || return 1
++  # Wait for app readiness before checking the protected endpoint.
++  wait_for_app "http://127.0.0.1:$DE_PORT/de2api/dekey" || return 1
