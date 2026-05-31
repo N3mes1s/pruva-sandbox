@@ -1,20 +1,99 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -10,0 +11,2 @@
+@@ -8,20 +8,25 @@
+
+ cd "$ROOT"
+
 +export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
 +
-@@ -24,0 +27 @@
+ # Configuration
+ VULN_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.10"
+ FIXED_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
++RUN_ROOT="${PRUVA_REPRO_CACHE_DIR:-$ROOT/.pruva-repro-cache}/REPRO-2026-00168"
++mkdir -p "$RUN_ROOT"
+ DE_PORT=8100
+ MYSQL_ROOT_PASSWORD="Password123@mysql"
+ DE_DB="dataease"
+
+ # Prepare data directories
+-DATA_DIR="$ROOT/dataease-run"
++DATA_DIR="$RUN_ROOT/dataease-run"
+ mkdir -p "$DATA_DIR"/conf "$DATA_DIR"/logs "$DATA_DIR"/data/mysql "$DATA_DIR"/bin/mysql \
+   "$DATA_DIR"/data/static-resource "$DATA_DIR"/cache "$DATA_DIR"/data/geo \
+   "$DATA_DIR"/data/appearance "$DATA_DIR"/data/exportData "$DATA_DIR"/data/plugin \
+   "$DATA_DIR"/data/font "$DATA_DIR"/data/i18n
 +chmod -R a+rwX "$DATA_DIR"
-@@ -105 +108 @@
+
+ # Write MySQL init
+ if [ ! -f "$DATA_DIR/bin/mysql/init.sql" ]; then
+@@ -102,11 +107,11 @@
+
+ wait_for_app() {
+   local url=$1
 -  local max_wait=${2:-180}
 +  local max_wait=${2:-420}
-@@ -109 +112 @@
+   echo -n "[+] Waiting for app at $url"
+   for i in $(seq 1 $max_wait); do
+     local code
 -    code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
 +    code=$(curl --max-time 5 -s -o /dev/null -w "%{http_code}" "$url" || true)
-@@ -117,0 +121 @@
+     if [ "$code" = "401" ] || [ "$code" = "200" ]; then
+       echo " OK (${code})"
+       return 0
+@@ -115,6 +120,8 @@
+     echo -n "."
+   done
+   echo " TIMEOUT"
 +  docker logs dataease --tail 200 > "$LOGS/dataease_startup_fail.log" 2>&1 || true
-@@ -175,2 +179,2 @@
++  docker logs mysql-de --tail 100 > "$LOGS/mysql_startup_fail.log" 2>&1 || true
+   return 1
+ }
+
+@@ -125,10 +132,11 @@
+
+   docker run -d --name mysql-de --network dataease-network \
+     -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+-    -v "$DATA_DIR/conf/my.cnf:/etc/mysql/conf.d/my.cnf" \
+-    -v "$DATA_DIR/bin/mysql:/docker-entrypoint-initdb.d" \
+-    -v "$DATA_DIR/data/mysql:/var/lib/mysql" \
+-    "$MYSQL_IMAGE" >/dev/null
++    -e MYSQL_DATABASE="$DE_DB" \
++    "$MYSQL_IMAGE" \
++    --max_connections=500 \
++    --character-set-server=utf8mb4 \
++    --collation-server=utf8mb4_0900_ai_ci >/dev/null
+
+   echo -n "[+] Waiting for MySQL"
+   for i in $(seq 1 60); do
+@@ -154,16 +162,9 @@
+
+   # Start DataEase
+   docker run -d --name dataease --network dataease-network -p "$DE_PORT:$DE_PORT" \
+-    -v "$DATA_DIR/conf:/opt/apps/config" \
+-    -v "$DATA_DIR/logs:/opt/dataease2.0/logs" \
+-    -v "$DATA_DIR/data/static-resource:/opt/dataease2.0/data/static-resource" \
+-    -v "$DATA_DIR/cache:/opt/dataease2.0/cache" \
+-    -v "$DATA_DIR/data/geo:/opt/dataease2.0/data/geo" \
+-    -v "$DATA_DIR/data/appearance:/opt/dataease2.0/data/appearance" \
+-    -v "$DATA_DIR/data/exportData:/opt/dataease2.0/data/exportData" \
+-    -v "$DATA_DIR/data/plugin:/opt/dataease2.0/data/plugin" \
+-    -v "$DATA_DIR/data/font:/opt/dataease2.0/data/font" \
+-    -v "$DATA_DIR/data/i18n:/opt/dataease2.0/data/i18n" \
++    -e SPRING_DATASOURCE_URL="jdbc:mysql://mysql-de:3306/dataease?autoReconnect=false&useUnicode=true&characterEncoding=UTF-8&characterSetResults=UTF-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true" \
++    -e SPRING_DATASOURCE_USERNAME=root \
++    -e SPRING_DATASOURCE_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+     -e DE_MYSQL_HOST=mysql-de \
+     -e DE_MYSQL_PORT=3306 \
+     -e DE_MYSQL_DB=dataease \
+@@ -172,8 +173,8 @@
+     -e DE_INSTALL_MODE=community \
+     "$image" >/dev/null
+
 -  # Wait for app
 -  wait_for_app "http://127.0.0.1:$DE_PORT/de2api/user/personInfo" || return 1
 +  # Wait for app readiness before checking the protected endpoint.
 +  wait_for_app "http://127.0.0.1:$DE_PORT/de2api/dekey" || return 1
+
+   # Baseline: anonymous request should 401
+   echo "[+] Anonymous baseline (no token):"
