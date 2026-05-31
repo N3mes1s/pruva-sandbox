@@ -1,11 +1,31 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -6,6 +6,8 @@
- mkdir -p "$LOGS"
- 
- cd "$ROOT"
-+
+@@ -9,0 +10,12 @@
 +export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
- 
- # Cleanup on exit
- cleanup() {
++
++if ! python3 - <<'PY' >/dev/null 2>&1
++import requests
++import rsa
++from Crypto.Cipher import AES
++PY
++then
++  echo "[+] Installing Python login dependencies..."
++  python3 -m pip install --break-system-packages -q requests pycryptodome rsa
++fi
++
+@@ -23 +35 @@
+-    image: mysql:8.4
++    image: registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5
+@@ -48,0 +61,7 @@
++    environment:
++      DE_MYSQL_HOST: mysql
++      DE_MYSQL_PORT: 3306
++      DE_MYSQL_DB: dataease
++      DE_MYSQL_USER: root
++      DE_MYSQL_PASSWORD: Pruva2026!
++      DE_INSTALL_MODE: community
+@@ -105 +124 @@
+-    resp=$(curl -sf http://localhost:8100/de2api/dekey 2>/dev/null || echo "")
++    resp=$(curl --max-time 5 -sf http://localhost:8100/de2api/dekey 2>/dev/null || echo "")
+@@ -113,0 +133 @@
++  docker logs mysql --tail 50 > "$LOGS/mysql_startup_fail.log" 2>&1 || true
