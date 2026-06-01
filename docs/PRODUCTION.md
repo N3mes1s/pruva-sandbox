@@ -36,6 +36,12 @@ by:
 Do not use `:latest` for production Codespaces or worker execution. `latest` is
 only a development convenience and is not a production contract.
 
+For a worker/API rollout, code inspection is not enough. At least one
+post-deploy production reproduction must expose `environment.sandbox_image`
+matching the promoted digest, or an authenticated production admin/deploy check
+must prove that the worker image was rebuilt and restarted with the same
+`PRUVA_SANDBOX_IMAGE` value.
+
 ## Patch Policy
 
 `repro-patches/` is the only supported place for public repro-specific fixes
@@ -122,11 +128,13 @@ Before a sandbox image or patch set is production-ready:
 6. `./scripts/test-codespaces.sh --latest 20` passes.
 7. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-8. Any Modal smoke required for the release passes with credentials supplied
+8. A post-deploy API record or authenticated production deploy check proves
+   the worker/API rollout is using the promoted `PRUVA_SANDBOX_IMAGE` digest.
+9. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-9. No `repro-patches/` file contains tokens, private repo URLs, private binary
+10. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-10. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+11. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 
