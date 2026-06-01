@@ -24,6 +24,9 @@ SANDBOX_IMAGE_OVERRIDE="${PRUVA_SANDBOX_IMAGE:-}"
 MODAL_REPRO_IDS="${MODAL_REPRO_IDS:-REPRO-2026-00185}"
 MODAL_CACHE_VOLUME="${PRUVA_MODAL_CACHE_VOLUME:-}"
 RUN_CODESPACES=true
+RUN_REAL_CODESPACES=false
+CODESPACES_MODE="${CODESPACES_MODE:-verify}"
+CODESPACES_MAX_PARALLEL="${CODESPACES_MAX_PARALLEL:-3}"
 RUN_MODAL=auto
 RUN_MANIFEST=true
 FETCH_PRUVA=false
@@ -47,6 +50,10 @@ OPTIONS:
     --api-url URL           Pruva API base URL (default: https://api.pruva.dev/v1)
     --sandbox-image IMAGE   Override the sandbox image used for Codespaces/Modal checks
     --skip-codespaces       Skip latest-N Codespaces readiness
+    --real-codespaces       Also create real Codespaces and check the startup path
+    --codespaces-mode MODE  Real Codespaces mode: available or verify (default: ${CODESPACES_MODE})
+    --codespaces-max-parallel N
+                           Max concurrent real Codespaces (default: ${CODESPACES_MAX_PARALLEL})
     --skip-manifest         Skip registry manifest resolution for the pinned image
     --skip-modal            Skip Modal smoke
     --require-modal         Fail if Modal credentials are absent, then run Modal smoke
@@ -58,6 +65,8 @@ OPTIONS:
 ENVIRONMENT:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required only when Modal runs.
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
+    CODESPACES_MODE and CODESPACES_MAX_PARALLEL can configure
+    --real-codespaces defaults.
     PRUVA_MODAL_CACHE_VOLUME can also be used instead of --modal-cache-volume.
     PYTHON can override the Python interpreter used for Modal. By default the
     script prefers .venv/bin/python, then uv run python, then python3.
@@ -66,7 +75,8 @@ WHAT IT VALIDATES:
     1. pruva worker/docker image pinning through make sandbox-image-check
     2. optional GHCR manifest resolution for the pinned sandbox digest
     3. pruva-sandbox latest-N Codespaces readiness against the same digest
-    4. optional Modal pruva-verify smoke against the same digest using the image binary
+    4. optional real Codespaces startup verification for latest-N repros
+    5. optional Modal pruva-verify smoke against the same digest using the image binary
 EOF
 }
 
@@ -115,6 +125,18 @@ while [[ $# -gt 0 ]]; do
       RUN_CODESPACES=false
       shift
       ;;
+    --real-codespaces)
+      RUN_REAL_CODESPACES=true
+      shift
+      ;;
+    --codespaces-mode)
+      CODESPACES_MODE="$2"
+      shift 2
+      ;;
+    --codespaces-max-parallel)
+      CODESPACES_MAX_PARALLEL="$2"
+      shift 2
+      ;;
     --skip-manifest)
       RUN_MANIFEST=false
       shift
@@ -147,6 +169,11 @@ done
 
 git -C "$PRUVA_REPO" rev-parse --git-dir >/dev/null 2>&1 || fail "pruva repo not found: $PRUVA_REPO"
 [[ "$LATEST" =~ ^[0-9]+$ ]] || fail "--latest must be numeric"
+case "$CODESPACES_MODE" in
+  available|verify) ;;
+  *) fail "--codespaces-mode must be 'available' or 'verify'" ;;
+esac
+[[ "$CODESPACES_MAX_PARALLEL" =~ ^[0-9]+$ && "$CODESPACES_MAX_PARALLEL" -ge 1 ]] || fail "--codespaces-max-parallel must be a positive integer"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_CMD=("$PYTHON")
@@ -206,6 +233,19 @@ if [[ "$RUN_CODESPACES" == true ]]; then
   pass "latest-$LATEST Codespaces readiness passed"
 else
   warn "Skipped Codespaces readiness"
+fi
+
+if [[ "$RUN_REAL_CODESPACES" == true ]]; then
+  log "Running real Codespaces latest-$LATEST mode=$CODESPACES_MODE max_parallel=$CODESPACES_MAX_PARALLEL"
+  PRUVA_API_URL="$API_URL" \
+    "$SANDBOX_REPO/scripts/test-codespaces-gh.sh" \
+      --latest "$LATEST" \
+      --api-url "$API_URL" \
+      --mode "$CODESPACES_MODE" \
+      --max-parallel "$CODESPACES_MAX_PARALLEL"
+  pass "latest-$LATEST real Codespaces check passed"
+else
+  warn "Skipped real Codespaces startup verification"
 fi
 
 modal_id_state=missing

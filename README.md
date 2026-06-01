@@ -95,6 +95,8 @@ pruva-verify CVE-2025-1716
 ├── .devcontainer/
 │   ├── Dockerfile              # Pre-built sandbox image
 │   └── devcontainer.json       # Codespace configuration
+├── docs/
+│   └── PRODUCTION.md           # Public production contract and gates
 ├── repro-patches/              # Known-issue patches for specific reproductions
 ├── scripts/
 │   ├── test-codespaces.sh      # Branch validation (devcontainer, API, artifacts)
@@ -134,6 +136,9 @@ The test suite covers input validation, artifact path normalization, script sele
 # Full Codespaces execution check through gh's SSH transport.
 ./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185 --mode verify
 
+# Latest-N real Codespaces execution with bounded parallelism.
+./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3
+
 # Optional raw-container smoke test in CI. This does not apply devcontainer
 # features such as docker-outside-of-docker or sshd.
 gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
@@ -163,6 +168,12 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 # Production parity gate: checks pruva's pinned worker image contract,
 # latest-20 Codespaces readiness, and Modal smoke when credentials are present.
 ./scripts/test-production-parity.sh
+
+# Production parity gate including real Codespaces startup verification.
+./scripts/test-production-parity.sh \
+  --real-codespaces \
+  --codespaces-mode verify \
+  --codespaces-max-parallel 3
 
 # Require Modal for the production gate.
 ./scripts/test-production-parity.sh --require-modal --modal-repro-ids REPRO-2026-00185
