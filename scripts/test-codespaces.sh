@@ -205,7 +205,7 @@ test_branch() {
   pass "API metadata fetched (HTTP 200)"
 
   # Step 7: Check Codespaces image pinning and parity with reproduction metadata when available
-  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby docker_compose_mode sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
@@ -213,6 +213,7 @@ test_branch() {
   expected_image="${metadata_image:-$DEFAULT_SANDBOX_IMAGE}"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
   docker_moby=$(echo "$devcontainer" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
+  docker_compose_mode=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].dockerDashComposeVersion // "unset"')
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
   if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
@@ -251,6 +252,13 @@ test_branch() {
     errors=$((errors + 1))
   else
     pass "docker-outside-of-docker moby=false"
+  fi
+
+  if [[ "$docker_compose_mode" != "none" ]]; then
+    fail "docker-outside-of-docker must not install the docker-compose shim; found dockerDashComposeVersion='${docker_compose_mode}'"
+    errors=$((errors + 1))
+  else
+    pass "docker-outside-of-docker docker-compose shim disabled"
   fi
 
   if [[ "$sshd_version" != "latest" ]]; then
