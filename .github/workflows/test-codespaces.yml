@@ -34,6 +34,10 @@ on:
           - none
           - available
           - verify
+      codespaces_max_parallel:
+        description: 'Max concurrent real Codespaces when codespaces_mode is enabled'
+        required: false
+        default: '3'
 
   # Can be called from other workflows (e.g. scan-new-repros)
   workflow_call:
@@ -62,6 +66,10 @@ on:
         type: string
         required: false
         default: 'none'
+      codespaces_max_parallel:
+        type: string
+        required: false
+        default: '3'
     secrets:
       CODESPACES_PAT:
         required: false
@@ -382,6 +390,7 @@ jobs:
       - name: Validate Codespaces configuration
         env:
           CODESPACES_MODE: ${{ inputs.codespaces_mode || 'none' }}
+          CODESPACES_MAX_PARALLEL: ${{ inputs.codespaces_max_parallel || '3' }}
           CODESPACES_TOKEN: ${{ secrets.CODESPACES_PAT }}
         run: |
           case "$CODESPACES_MODE" in
@@ -391,6 +400,11 @@ jobs:
               exit 1
               ;;
           esac
+
+          if ! [[ "$CODESPACES_MAX_PARALLEL" =~ ^[0-9]+$ ]] || [ "$CODESPACES_MAX_PARALLEL" -lt 1 ]; then
+            echo "::error::codespaces_max_parallel must be a positive integer."
+            exit 1
+          fi
 
           if [ -z "$CODESPACES_TOKEN" ]; then
             echo "::error::codespaces_mode=$CODESPACES_MODE requires a CODESPACES_PAT repository secret with the GitHub Codespaces scope."
@@ -403,12 +417,13 @@ jobs:
           LATEST_COUNT: ${{ inputs.latest_count || '10' }}
           SPECIFIC_REPRO: ${{ inputs.specific_repro || '' }}
           CODESPACES_MODE: ${{ inputs.codespaces_mode || 'none' }}
+          CODESPACES_MAX_PARALLEL: ${{ inputs.codespaces_max_parallel || '3' }}
         run: |
           chmod +x scripts/test-codespaces-gh.sh
           if [ -n "$SPECIFIC_REPRO" ]; then
-            ./scripts/test-codespaces-gh.sh --repro-id "$SPECIFIC_REPRO" --api-url "$API_URL" --mode "$CODESPACES_MODE"
+            ./scripts/test-codespaces-gh.sh --repro-id "$SPECIFIC_REPRO" --api-url "$API_URL" --mode "$CODESPACES_MODE" --max-parallel "$CODESPACES_MAX_PARALLEL"
           else
-            ./scripts/test-codespaces-gh.sh --latest "$LATEST_COUNT" --api-url "$API_URL" --mode "$CODESPACES_MODE"
+            ./scripts/test-codespaces-gh.sh --latest "$LATEST_COUNT" --api-url "$API_URL" --mode "$CODESPACES_MODE" --max-parallel "$CODESPACES_MAX_PARALLEL"
           fi
 
   # Job 5: Collect missing dependencies and open an issue to update Dockerfile
