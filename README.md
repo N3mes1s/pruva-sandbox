@@ -145,7 +145,10 @@ gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
 
 # Real Codespaces test in CI. Configure a CODESPACES_PAT repository secret with
 # Codespaces scope first.
-gh workflow run test-codespaces.yml -f latest_count=20 -f codespaces_mode=verify
+gh workflow run test-codespaces.yml \
+  -f latest_count=20 \
+  -f codespaces_mode=verify \
+  -f codespaces_max_parallel=3
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 uv run python scripts/test_codespaces_modal.py --latest 5
