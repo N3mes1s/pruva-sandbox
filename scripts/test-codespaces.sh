@@ -33,6 +33,7 @@ LATEST_SOURCE="api"
 TEST_ALL=false
 SINGLE_BRANCH=""
 DOWNLOAD_SCRIPT=true
+MAX_PARALLEL="${CODESPACES_READINESS_MAX_PARALLEL:-4}"
 
 usage() {
   cat <<EOF
@@ -48,6 +49,7 @@ ${BOLD}OPTIONS:${NC}
     --branch NAME      Test a single branch (e.g. repro/REPRO-2026-00105)
     --no-download      Skip downloading the reproduction script (metadata only)
     --api-url URL      Override the Pruva API URL
+    --max-parallel N   Validate up to N branches concurrently (default: ${MAX_PARALLEL})
     -h, --help         Show this help message
 
 ${BOLD}WHAT IT VALIDATES:${NC}
@@ -90,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       API_URL="$2"
       shift 2
       ;;
+    --max-parallel)
+      MAX_PARALLEL="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -101,6 +107,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! [[ "$MAX_PARALLEL" =~ ^[0-9]+$ ]] || [[ "$MAX_PARALLEL" -lt 1 ]]; then
+  echo "Invalid --max-parallel '${MAX_PARALLEL}' (expected positive integer)" >&2
+  exit 1
+fi
 
 # Counters
 TOTAL=0
@@ -353,6 +364,7 @@ echo -e "${BOLD}=========================================${NC}"
 echo -e "  API: ${API_URL}"
 echo -e "  Default sandbox image: ${DEFAULT_SANDBOX_IMAGE}"
 echo -e "  Download scripts: ${DOWNLOAD_SCRIPT}"
+echo -e "  Max parallel: ${MAX_PARALLEL}"
 if [[ -z "$SINGLE_BRANCH" && "$TEST_ALL" != "true" ]]; then
   echo -e "  Latest source: ${LATEST_SOURCE}"
 fi
@@ -392,7 +404,113 @@ fi
 
 log "Testing ${#BRANCHES[@]} branch(es)..."
 
-for branch in "${BRANCHES[@]}"; do
+run_branches_parallel() {
+  local run_dir
+  run_dir=$(mktemp -d "${TMPDIR:-/tmp}/pruva-codespaces-readiness.XXXXXX")
+  log "Running branch checks with max parallel ${MAX_PARALLEL}"
+  log "Per-branch logs: ${run_dir}"
+
+  local -A pid_to_branch=()
+  local -A pid_to_log=()
+  local -A pid_to_result=()
+  local -a parallel_pids=()
+  local index=0
+
+  start_child() {
+    local branch="$1"
+    local branch_name="${branch#origin/}"
+    local safe_name="${branch_name//\//_}"
+    local log_file="${run_dir}/${safe_name}.log"
+    local result_file="${run_dir}/${safe_name}.result"
+
+    log "START ${branch_name}"
+    (
+      set +e
+      RESULTS=()
+      test_branch "$branch"
+      rc=$?
+      if [[ ${#RESULTS[@]} -gt 0 ]]; then
+        printf '%s\n' "${RESULTS[$((${#RESULTS[@]} - 1))]}" >"$result_file"
+      else
+        case "$rc" in
+          0) printf 'PASS %s\n' "$branch_name" >"$result_file" ;;
+          2) printf 'WARN %s\n' "$branch_name" >"$result_file" ;;
+          *) printf 'FAIL %s: exit %s\n' "$branch_name" "$rc" >"$result_file" ;;
+        esac
+      fi
+      exit "$rc"
+    ) >"$log_file" 2>&1 &
+
+    local pid=$!
+    parallel_pids+=("$pid")
+    pid_to_branch["$pid"]="$branch_name"
+    pid_to_log["$pid"]="$log_file"
+    pid_to_result["$pid"]="$result_file"
+  }
+
+  finish_child() {
+    local finished_pid rc branch_name log_file result_file result
+    set +e
+    wait -n -p finished_pid
+    rc=$?
+    set -e
+
+    branch_name="${pid_to_branch[$finished_pid]:-unknown}"
+    log_file="${pid_to_log[$finished_pid]:-${run_dir}/${branch_name}.log}"
+    result_file="${pid_to_result[$finished_pid]:-${run_dir}/${branch_name}.result}"
+
+    local remaining=()
+    local pid
+    for pid in "${parallel_pids[@]}"; do
+      [[ "$pid" != "$finished_pid" ]] && remaining+=("$pid")
+    done
+    parallel_pids=("${remaining[@]}")
+    unset 'pid_to_branch[$finished_pid]'
+    unset 'pid_to_log[$finished_pid]'
+    unset 'pid_to_result[$finished_pid]'
+
+    if [[ -f "$result_file" ]]; then
+      result="$(cat "$result_file")"
+    else
+      result="FAIL ${branch_name}: exit ${rc}"
+    fi
+    RESULTS+=("$result")
+    TOTAL=$((TOTAL + 1))
+
+    case "$rc" in
+      0)
+        PASSED=$((PASSED + 1))
+        log "PASS ${branch_name}"
+        ;;
+      2)
+        WARNINGS=$((WARNINGS + 1))
+        PASSED=$((PASSED + 1))
+        log "WARN ${branch_name}; log: ${log_file}"
+        ;;
+      *)
+        FAILED=$((FAILED + 1))
+        fail "FAIL ${branch_name} (exit ${rc}); log: ${log_file}"
+        tail -120 "$log_file" >&2 || true
+        ;;
+    esac
+  }
+
+  while [[ $index -lt ${#BRANCHES[@]} || ${#pid_to_branch[@]} -gt 0 ]]; do
+    while [[ $index -lt ${#BRANCHES[@]} && ${#pid_to_branch[@]} -lt $MAX_PARALLEL ]]; do
+      start_child "${BRANCHES[$index]}"
+      index=$((index + 1))
+    done
+
+    if [[ ${#pid_to_branch[@]} -gt 0 ]]; then
+      finish_child
+    fi
+  done
+}
+
+if [[ "$MAX_PARALLEL" -gt 1 && ${#BRANCHES[@]} -gt 1 ]]; then
+  run_branches_parallel
+else
+  for branch in "${BRANCHES[@]}"; do
   TOTAL=$((TOTAL + 1))
   if test_branch "$branch"; then
     PASSED=$((PASSED + 1))
@@ -405,7 +523,8 @@ for branch in "${BRANCHES[@]}"; do
       FAILED=$((FAILED + 1))
     fi
   fi
-done
+  done
+fi
 
 # Summary
 echo ""

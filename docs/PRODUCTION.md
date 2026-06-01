@@ -104,6 +104,7 @@ digest or declaring latest reproductions healthy:
   --real-codespaces \
   --codespaces-mode verify \
   --codespaces-max-parallel 3 \
+  --readiness-max-parallel 3 \
   --skip-modal
 ```
 
@@ -114,6 +115,7 @@ Run Modal only when the required credentials are exported:
   --real-codespaces \
   --codespaces-mode verify \
   --codespaces-max-parallel 3 \
+  --readiness-max-parallel 3 \
   --require-modal \
   --modal-repro-ids REPRO-2026-00185
 ```
@@ -129,7 +131,9 @@ For direct real Codespaces testing without the private `pruva` repo check:
 ```
 
 Use a small parallelism cap. Each lane creates a real Codespace and may pull
-large Docker images; `3` is the default production recommendation.
+large Docker images; `3` is the default production recommendation. The cheaper
+structural branch check and rollout-proof metadata fetches also run with bounded
+parallelism, so latest-20 validation should not serialize on API calls.
 
 ## Promotion Checklist
 
@@ -144,7 +148,7 @@ Before a sandbox image or patch set is production-ready:
 5. `cargo test` passes under `pruva-verify-rs/`.
 6. `./scripts/test-production-parity.sh --skip-modal` passes without
    `--skip-rollout-proof`.
-7. `./scripts/test-codespaces.sh --latest 20` passes.
+7. `./scripts/test-codespaces.sh --latest 20 --max-parallel 4` passes.
 8. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
 9. A post-deploy API record or authenticated production deploy check proves

@@ -183,12 +183,13 @@ jobs:
         env:
           LATEST_COUNT: ${{ inputs.latest_count || '10' }}
           SPECIFIC_REPRO: ${{ inputs.specific_repro || '' }}
+          READINESS_MAX_PARALLEL: '4'
         run: |
           chmod +x scripts/test-codespaces.sh
           if [ -n "$SPECIFIC_REPRO" ]; then
-            ./scripts/test-codespaces.sh --branch "origin/repro/$SPECIFIC_REPRO" --api-url "$API_URL"
+            ./scripts/test-codespaces.sh --branch "origin/repro/$SPECIFIC_REPRO" --api-url "$API_URL" --max-parallel "$READINESS_MAX_PARALLEL"
           else
-            ./scripts/test-codespaces.sh --latest "$LATEST_COUNT" --api-url "$API_URL"
+            ./scripts/test-codespaces.sh --latest "$LATEST_COUNT" --api-url "$API_URL" --max-parallel "$READINESS_MAX_PARALLEL"
           fi
 
   # Job 3: Optional raw-container smoke test.

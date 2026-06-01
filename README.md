@@ -127,8 +127,8 @@ The test suite covers input validation, artifact path normalization, script sele
 ### Running integration tests
 
 ```bash
-# Validate repro branch configuration against the API
-./scripts/test-codespaces.sh --latest 10
+# Validate repro branch configuration against the API with bounded parallelism
+./scripts/test-codespaces.sh --latest 10 --max-parallel 4
 
 # Real GitHub Codespaces smoke test, matching the web UI creation path.
 ./scripts/test-codespaces-gh.sh --repro-id REPRO-2026-00185
@@ -189,13 +189,15 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 # Direct rollout proof check when a post-deploy reproduction ID is known.
 ./scripts/check-production-rollout-proof.sh \
   --repro-id REPRO-2026-00186 \
+  --max-parallel 8 \
   --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
 
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
   --real-codespaces \
   --codespaces-mode verify \
-  --codespaces-max-parallel 3
+  --codespaces-max-parallel 3 \
+  --readiness-max-parallel 3
 
 # Require Modal for the production gate.
 ./scripts/test-production-parity.sh --require-modal --modal-repro-ids REPRO-2026-00185
