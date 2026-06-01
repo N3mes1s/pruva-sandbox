@@ -192,6 +192,12 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
   --max-parallel 8 \
   --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
 
+# Add PRUVA_API_TOKEN to also inspect active workers for
+# capabilities.sandbox_image after the private worker rollout.
+PRUVA_API_TOKEN='pak_...' \
+  ./scripts/check-production-rollout-proof.sh \
+    --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
+
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
   --real-codespaces \
