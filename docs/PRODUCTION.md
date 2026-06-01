@@ -69,10 +69,18 @@ can run before production has been rolled:
 
 After production is deployed, require API rollout proof. By default this checks
 the latest 20 published reproductions and requires at least one detail record to
-expose `environment.sandbox_image` with the promoted digest:
+expose `environment.sandbox_image` with the promoted digest. If `PRUVA_API_TOKEN`
+is set to an admin-scoped API token, the same gate also checks active workers for
+`capabilities.sandbox_image` so a restarted worker can prove the live rollout
+before the next reproduction record is created:
 
 ```bash
 ./scripts/test-production-parity.sh --skip-modal
+```
+
+```bash
+PRUVA_API_TOKEN='pak_...' \
+  ./scripts/test-production-parity.sh --skip-modal
 ```
 
 If the post-deploy reproduction ID is known, check that record directly:

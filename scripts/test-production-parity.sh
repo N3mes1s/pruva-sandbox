@@ -86,6 +86,8 @@ ENVIRONMENT:
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
     PRUVA_ROLLOUT_PROOF_REPRO_IDS can provide post-deploy repro IDs.
     PRUVA_ROLLOUT_PROOF_MIN_MATCHING can configure required API proof count.
+    PRUVA_API_TOKEN can provide admin access for active worker sandbox-image
+    proof through /v1/workers when reproduction records have not rolled yet.
     CODESPACES_MODE, CODESPACES_MAX_PARALLEL, and
     CODESPACES_READINESS_MAX_PARALLEL can configure Codespaces defaults.
     PRUVA_ROLLOUT_PROOF_MAX_PARALLEL can configure rollout proof concurrency.
