@@ -66,6 +66,13 @@ Run the public boundary check directly when reviewing patch-only changes:
 ./scripts/check-public-boundary.sh
 ```
 
+Audit whether a local private `pruva` checkout is safe to use as an operator
+execution path:
+
+```bash
+./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
+```
+
 Run the full public Codespaces startup gate before promoting a new sandbox
 digest or declaring latest reproductions healthy:
 
@@ -107,17 +114,19 @@ Before a sandbox image or patch set is production-ready:
 
 1. `git status --short --branch` is clean on `main`.
 2. `./scripts/check-public-boundary.sh` passes.
-3. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
+3. `./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main`
+   passes for any checkout used to publish or operate production runs.
+4. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
    passes.
-4. `cargo test` passes under `pruva-verify-rs/`.
-5. `./scripts/test-codespaces.sh --latest 20` passes.
-6. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
+5. `cargo test` passes under `pruva-verify-rs/`.
+6. `./scripts/test-codespaces.sh --latest 20` passes.
+7. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-7. Any Modal smoke required for the release passes with credentials supplied
+8. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-8. No `repro-patches/` file contains tokens, private repo URLs, private binary
+9. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-9. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+10. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 

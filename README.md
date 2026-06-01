@@ -175,6 +175,9 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 # Public/private boundary check for patch-only changes.
 ./scripts/check-public-boundary.sh
 
+# Local private pruva checkout readiness for publishing into Codespaces.
+./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
+
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
   --real-codespaces \
