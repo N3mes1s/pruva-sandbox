@@ -29,6 +29,9 @@ CODESPACES_MODE="${CODESPACES_MODE:-verify}"
 CODESPACES_MAX_PARALLEL="${CODESPACES_MAX_PARALLEL:-3}"
 RUN_MODAL=auto
 RUN_MANIFEST=true
+RUN_ROLLOUT_PROOF=true
+ROLLOUT_PROOF_MIN_MATCHING="${PRUVA_ROLLOUT_PROOF_MIN_MATCHING:-1}"
+ROLLOUT_PROOF_REPRO_IDS="${PRUVA_ROLLOUT_PROOF_REPRO_IDS:-}"
 FETCH_PRUVA=false
 PYTHON_CMD=()
 
@@ -55,6 +58,12 @@ OPTIONS:
     --codespaces-max-parallel N
                            Max concurrent real Codespaces (default: ${CODESPACES_MAX_PARALLEL})
     --skip-manifest         Skip registry manifest resolution for the pinned image
+    --skip-rollout-proof    Skip production API environment.sandbox_image proof
+    --rollout-proof-repro-ids IDS
+                           Comma-separated post-deploy repro IDs to inspect for
+                           environment.sandbox_image. Defaults to latest-N.
+    --rollout-proof-min-matching N
+                           Required matching production API records (default: ${ROLLOUT_PROOF_MIN_MATCHING})
     --skip-modal            Skip Modal smoke
     --require-modal         Fail if Modal credentials are absent, then run Modal smoke
     --modal-repro-ids IDS   Comma-separated Modal smoke repro IDs (default: REPRO-2026-00185)
@@ -65,6 +74,8 @@ OPTIONS:
 ENVIRONMENT:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required only when Modal runs.
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
+    PRUVA_ROLLOUT_PROOF_REPRO_IDS can provide post-deploy repro IDs.
+    PRUVA_ROLLOUT_PROOF_MIN_MATCHING can configure required API proof count.
     CODESPACES_MODE and CODESPACES_MAX_PARALLEL can configure
     --real-codespaces defaults.
     PRUVA_MODAL_CACHE_VOLUME can also be used instead of --modal-cache-volume.
@@ -75,9 +86,10 @@ WHAT IT VALIDATES:
     1. public/private repository boundary for tracked sandbox files
     2. pruva worker/docker image pinning through make sandbox-image-check
     3. optional GHCR manifest resolution for the pinned sandbox digest
-    4. pruva-sandbox latest-N Codespaces readiness against the same digest
-    5. optional real Codespaces startup verification for latest-N repros
-    6. optional Modal pruva-verify smoke against the same digest using the image binary
+    4. production API rollout proof for environment.sandbox_image
+    5. pruva-sandbox latest-N Codespaces readiness against the same digest
+    6. optional real Codespaces startup verification for latest-N repros
+    7. optional Modal pruva-verify smoke against the same digest using the image binary
 EOF
 }
 
@@ -142,6 +154,18 @@ while [[ $# -gt 0 ]]; do
       RUN_MANIFEST=false
       shift
       ;;
+    --skip-rollout-proof)
+      RUN_ROLLOUT_PROOF=false
+      shift
+      ;;
+    --rollout-proof-repro-ids)
+      ROLLOUT_PROOF_REPRO_IDS="$2"
+      shift 2
+      ;;
+    --rollout-proof-min-matching)
+      ROLLOUT_PROOF_MIN_MATCHING="$2"
+      shift 2
+      ;;
     --skip-modal)
       RUN_MODAL=skip
       shift
@@ -170,6 +194,7 @@ done
 
 git -C "$PRUVA_REPO" rev-parse --git-dir >/dev/null 2>&1 || fail "pruva repo not found: $PRUVA_REPO"
 [[ "$LATEST" =~ ^[0-9]+$ ]] || fail "--latest must be numeric"
+[[ "$ROLLOUT_PROOF_MIN_MATCHING" =~ ^[0-9]+$ && "$ROLLOUT_PROOF_MIN_MATCHING" -ge 1 ]] || fail "--rollout-proof-min-matching must be a positive integer"
 case "$CODESPACES_MODE" in
   available|verify) ;;
   *) fail "--codespaces-mode must be 'available' or 'verify'" ;;
@@ -230,6 +255,23 @@ fi
 [[ -n "$SANDBOX_IMAGE" ]] || fail "could not resolve pinned sandbox image from pruva Dockerfile"
 
 log "Using sandbox image: $SANDBOX_IMAGE"
+
+if [[ "$RUN_ROLLOUT_PROOF" == true ]]; then
+  log "Checking production API rollout proof"
+  rollout_args=(
+    --api-url "$API_URL"
+    --sandbox-image "$SANDBOX_IMAGE"
+    --latest "$LATEST"
+    --min-matching "$ROLLOUT_PROOF_MIN_MATCHING"
+  )
+  if [[ -n "$ROLLOUT_PROOF_REPRO_IDS" ]]; then
+    rollout_args+=(--repro-ids "$ROLLOUT_PROOF_REPRO_IDS")
+  fi
+  "$SANDBOX_REPO/scripts/check-production-rollout-proof.sh" "${rollout_args[@]}"
+  pass "production API rollout proof passed"
+else
+  warn "Skipped production API rollout proof"
+fi
 
 if [[ "$RUN_CODESPACES" == true ]]; then
   log "Running pruva-sandbox latest-$LATEST Codespaces readiness"

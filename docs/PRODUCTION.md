@@ -60,10 +60,27 @@ Patch files must:
 
 ## Production Gates
 
-Run the cheap structural gate first:
+Run the cheap structural gate first. This intentionally skips deploy proof so it
+can run before production has been rolled:
+
+```bash
+./scripts/test-production-parity.sh --skip-modal --skip-rollout-proof
+```
+
+After production is deployed, require API rollout proof. By default this checks
+the latest 20 published reproductions and requires at least one detail record to
+expose `environment.sandbox_image` with the promoted digest:
 
 ```bash
 ./scripts/test-production-parity.sh --skip-modal
+```
+
+If the post-deploy reproduction ID is known, check that record directly:
+
+```bash
+./scripts/check-production-rollout-proof.sh \
+  --repro-id REPRO-2026-00186 \
+  --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
 ```
 
 Run the public boundary check directly when reviewing patch-only changes:
@@ -125,16 +142,18 @@ Before a sandbox image or patch set is production-ready:
 4. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
    passes.
 5. `cargo test` passes under `pruva-verify-rs/`.
-6. `./scripts/test-codespaces.sh --latest 20` passes.
-7. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
+6. `./scripts/test-production-parity.sh --skip-modal` passes without
+   `--skip-rollout-proof`.
+7. `./scripts/test-codespaces.sh --latest 20` passes.
+8. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-8. A post-deploy API record or authenticated production deploy check proves
+9. A post-deploy API record or authenticated production deploy check proves
    the worker/API rollout is using the promoted `PRUVA_SANDBOX_IMAGE` digest.
-9. Any Modal smoke required for the release passes with credentials supplied
+10. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-10. No `repro-patches/` file contains tokens, private repo URLs, private binary
+11. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-11. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+12. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 

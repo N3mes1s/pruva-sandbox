@@ -150,10 +150,10 @@ gh workflow run test-codespaces.yml \
   -f codespaces_mode=verify \
   -f codespaces_max_parallel=3
 
-The devcontainer uses Docker outside of Docker for the host socket and installs
-Compose v2 through the Docker CLI plugin only. The legacy `docker-compose` shim
-is disabled to avoid an extra mutable GitHub-release download during Codespaces
-startup.
+# The devcontainer uses Docker outside of Docker for the host socket and installs
+# Compose v2 through the Docker CLI plugin only. The legacy docker-compose shim
+# is disabled to avoid an extra mutable GitHub-release download during Codespaces
+# startup.
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 uv run python scripts/test_codespaces_modal.py --latest 5
@@ -173,15 +173,23 @@ uv run python scripts/test_codespaces_modal.py \
 PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
   uv run python scripts/test_codespaces_modal.py --latest 20
 
-# Production parity gate: checks pruva's pinned worker image contract,
-# latest-20 Codespaces readiness, and Modal smoke when credentials are present.
-./scripts/test-production-parity.sh
+# Pre-deploy structural parity gate.
+./scripts/test-production-parity.sh --skip-modal --skip-rollout-proof
+
+# Post-deploy production parity gate. Requires production API proof that at
+# least one reproduction was created with the promoted sandbox digest.
+./scripts/test-production-parity.sh --skip-modal
 
 # Public/private boundary check for patch-only changes.
 ./scripts/check-public-boundary.sh
 
 # Local private pruva checkout readiness for publishing into Codespaces.
 ./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
+
+# Direct rollout proof check when a post-deploy reproduction ID is known.
+./scripts/check-production-rollout-proof.sh \
+  --repro-id REPRO-2026-00186 \
+  --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
 
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
