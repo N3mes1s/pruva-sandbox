@@ -176,6 +176,9 @@ jobs:
       - name: Fetch all remote branches
         run: git fetch --all
 
+      - name: Check public/private boundary
+        run: ./scripts/check-public-boundary.sh
+
       - name: Run branch validation
         env:
           LATEST_COUNT: ${{ inputs.latest_count || '10' }}

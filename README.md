@@ -172,6 +172,9 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 # latest-20 Codespaces readiness, and Modal smoke when credentials are present.
 ./scripts/test-production-parity.sh
 
+# Public/private boundary check for patch-only changes.
+./scripts/check-public-boundary.sh
+
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
   --real-codespaces \

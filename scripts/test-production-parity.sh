@@ -72,11 +72,12 @@ ENVIRONMENT:
     script prefers .venv/bin/python, then uv run python, then python3.
 
 WHAT IT VALIDATES:
-    1. pruva worker/docker image pinning through make sandbox-image-check
-    2. optional GHCR manifest resolution for the pinned sandbox digest
-    3. pruva-sandbox latest-N Codespaces readiness against the same digest
-    4. optional real Codespaces startup verification for latest-N repros
-    5. optional Modal pruva-verify smoke against the same digest using the image binary
+    1. public/private repository boundary for tracked sandbox files
+    2. pruva worker/docker image pinning through make sandbox-image-check
+    3. optional GHCR manifest resolution for the pinned sandbox digest
+    4. pruva-sandbox latest-N Codespaces readiness against the same digest
+    5. optional real Codespaces startup verification for latest-N repros
+    6. optional Modal pruva-verify smoke against the same digest using the image binary
 EOF
 }
 
@@ -189,6 +190,10 @@ if [[ "$FETCH_PRUVA" == true ]]; then
   log "Fetching pruva repo"
   git -C "$PRUVA_REPO" fetch origin
 fi
+
+log "Checking public sandbox boundary"
+"$SANDBOX_REPO/scripts/check-public-boundary.sh"
+pass "public sandbox boundary passed"
 
 if [[ -n "$PRUVA_REF" ]]; then
   tmp_parent="${TMPDIR:-/tmp}"

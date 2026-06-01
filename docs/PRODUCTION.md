@@ -60,6 +60,12 @@ Run the cheap structural gate first:
 ./scripts/test-production-parity.sh --skip-modal
 ```
 
+Run the public boundary check directly when reviewing patch-only changes:
+
+```bash
+./scripts/check-public-boundary.sh
+```
+
 Run the full public Codespaces startup gate before promoting a new sandbox
 digest or declaring latest reproductions healthy:
 
@@ -100,17 +106,18 @@ large Docker images; `3` is the default production recommendation.
 Before a sandbox image or patch set is production-ready:
 
 1. `git status --short --branch` is clean on `main`.
-2. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
+2. `./scripts/check-public-boundary.sh` passes.
+3. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
    passes.
-3. `cargo test` passes under `pruva-verify-rs/`.
-4. `./scripts/test-codespaces.sh --latest 20` passes.
-5. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
+4. `cargo test` passes under `pruva-verify-rs/`.
+5. `./scripts/test-codespaces.sh --latest 20` passes.
+6. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-6. Any Modal smoke required for the release passes with credentials supplied
+7. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-7. No `repro-patches/` file contains tokens, private repo URLs, private binary
+8. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-8. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+9. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 
