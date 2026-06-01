@@ -150,6 +150,11 @@ gh workflow run test-codespaces.yml \
   -f codespaces_mode=verify \
   -f codespaces_max_parallel=3
 
+The devcontainer uses Docker outside of Docker for the host socket and installs
+Compose v2 through the Docker CLI plugin only. The legacy `docker-compose` shim
+is disabled to avoid an extra mutable GitHub-release download during Codespaces
+startup.
+
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 uv run python scripts/test_codespaces_modal.py --latest 5
 

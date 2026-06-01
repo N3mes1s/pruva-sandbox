@@ -135,6 +135,14 @@ parity and fast sandbox smoke tests, but it does not replace a real Codespaces
 startup check because Codespaces applies devcontainer features, branch-specific
 `REPRO_ID`, and the exact web UI creation path.
 
+The Codespaces devcontainer must keep the Docker CLI available through
+Docker-outside-of-Docker while disabling the legacy `docker-compose` shim. Repro
+scripts should use `docker compose`, which is provided by the Docker CLI plugin
+without a separate mutable GitHub-release download during startup.
+
+After changing the devcontainer contract, run `[Internal] Scan for New
+Reproductions` so existing `repro/*` branches receive the same configuration.
+
 When a repro is expensive, cache setup artifacts with `PRUVA_REPRO_CACHE_DIR` or
 the Modal cache-volume option, but keep the final vulnerability trigger and
 verdict generation uncached.
