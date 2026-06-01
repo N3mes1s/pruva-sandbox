@@ -22,8 +22,11 @@ SSH_TIMEOUT="10m"
 MACHINE=""
 LOCATION=""
 MODE="available"
+MAX_PARALLEL=1
 
 CREATED_CODESPACES=()
+PARALLEL_PIDS=()
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 usage() {
   cat <<EOF
@@ -51,6 +54,9 @@ OPTIONS:
                            the web UI creation path. verify waits for the
                            postCreateCommand pruva-verify result from the real
                            Codespaces startup path.
+    --max-parallel N       Run up to N Codespaces at once (default: ${MAX_PARALLEL}).
+                           Use a small value such as 3 for latest-20 verification
+                           to avoid quota and rate-limit noise.
     --keep                Keep created Codespaces for debugging.
     -h, --help            Show this help message.
 
@@ -69,6 +75,11 @@ fail() {
 }
 
 cleanup() {
+  for pid in "${PARALLEL_PIDS[@]:-}"; do
+    [[ -z "$pid" ]] && continue
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+  done
+
   if [[ "$KEEP" == "true" ]]; then
     return
   fi
@@ -389,6 +400,91 @@ test_one_repro() {
   return 0
 }
 
+run_parallel_repros() {
+  local run_dir
+  run_dir=$(mktemp -d "${TMPDIR:-/tmp}/pruva-codespaces-gh.XXXXXX")
+  log "Running ${#REPRO_IDS[@]} repro(s) with max parallel ${MAX_PARALLEL}"
+  log "Per-repro logs: ${run_dir}"
+
+  local -A pid_to_repro=()
+  local -A pid_to_log=()
+  local passed=0
+  local failed=0
+  local index=0
+
+  start_child() {
+    local repro_id="$1"
+    local log_file="${run_dir}/${repro_id}.log"
+    local cmd=(
+      "$SCRIPT_PATH"
+      --repro-id "$repro_id"
+      --repo "$REPO"
+      --api-url "$API_URL"
+      --idle-timeout "$IDLE_TIMEOUT"
+      --retention "$RETENTION_PERIOD"
+      --create-timeout "$CREATE_TIMEOUT"
+      --ssh-timeout "$SSH_TIMEOUT"
+      --mode "$MODE"
+      --max-parallel 1
+    )
+    [[ -n "$MACHINE" ]] && cmd+=(--machine "$MACHINE")
+    [[ -n "$LOCATION" ]] && cmd+=(--location "$LOCATION")
+    [[ "$KEEP" == "true" ]] && cmd+=(--keep)
+
+    log "START ${repro_id}"
+    "${cmd[@]}" >"$log_file" 2>&1 &
+    local pid=$!
+    PARALLEL_PIDS+=("$pid")
+    pid_to_repro["$pid"]="$repro_id"
+    pid_to_log["$pid"]="$log_file"
+  }
+
+  finish_child() {
+    local finished_pid rc repro_id log_file
+    set +e
+    wait -n -p finished_pid
+    rc=$?
+    set -e
+
+    repro_id="${pid_to_repro[$finished_pid]:-unknown}"
+    log_file="${pid_to_log[$finished_pid]:-${run_dir}/${repro_id}.log}"
+    unset 'pid_to_repro[$finished_pid]'
+    unset 'pid_to_log[$finished_pid]'
+
+    local remaining=()
+    local pid
+    for pid in "${PARALLEL_PIDS[@]}"; do
+      [[ "$pid" != "$finished_pid" ]] && remaining+=("$pid")
+    done
+    PARALLEL_PIDS=("${remaining[@]}")
+
+    if [[ $rc -eq 0 ]]; then
+      passed=$((passed + 1))
+      log "PASS ${repro_id}"
+    else
+      failed=$((failed + 1))
+      fail "FAIL ${repro_id} (exit ${rc}); log: ${log_file}"
+      tail -120 "$log_file" >&2 || true
+    fi
+  }
+
+  while [[ $index -lt ${#REPRO_IDS[@]} || ${#pid_to_repro[@]} -gt 0 ]]; do
+    while [[ $index -lt ${#REPRO_IDS[@]} && ${#pid_to_repro[@]} -lt $MAX_PARALLEL ]]; do
+      start_child "${REPRO_IDS[$index]}"
+      index=$((index + 1))
+    done
+
+    if [[ ${#pid_to_repro[@]} -gt 0 ]]; then
+      finish_child
+    fi
+  done
+
+  log "Summary: ${passed} passed, ${failed} failed"
+  if [[ $failed -gt 0 ]]; then
+    return 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repro-id)
@@ -442,6 +538,10 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"
       shift 2
       ;;
+    --max-parallel)
+      MAX_PARALLEL="$2"
+      shift 2
+      ;;
     --keep)
       KEEP=true
       shift
@@ -470,6 +570,11 @@ case "$MODE" in
     ;;
 esac
 
+if ! [[ "$MAX_PARALLEL" =~ ^[0-9]+$ ]] || [[ "$MAX_PARALLEL" -lt 1 ]]; then
+  fail "Invalid --max-parallel '${MAX_PARALLEL}' (expected positive integer)"
+  exit 1
+fi
+
 if [[ "$LATEST" != "0" ]]; then
   while IFS= read -r repro_id; do
     [[ -n "$repro_id" ]] && REPRO_IDS+=("$repro_id")
@@ -486,7 +591,13 @@ check_codespace_scope
 log "Repo: ${REPO}"
 log "API: ${API_URL}"
 log "Mode: ${MODE}"
+log "Max parallel: ${MAX_PARALLEL}"
 log "Keep Codespaces: ${KEEP}"
+
+if [[ "$MAX_PARALLEL" -gt 1 && ${#REPRO_IDS[@]} -gt 1 ]]; then
+  run_parallel_repros
+  exit $?
+fi
 
 passed=0
 failed=0
