@@ -1,0 +1,47 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -8,12 +8,43 @@
+ 
+ cd "$ROOT"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! dpkg -s libjpeg-dev libde265-dev libaom-dev aom-tools libdav1d-dev libyuv-dev libwebm-dev >/dev/null 2>&1; then
++    echo "[BUILD] Installing libheif build dependencies..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq \
++        build-essential cmake pkg-config git \
++        libjpeg-dev libde265-dev libaom-dev aom-tools libdav1d-dev libyuv-dev libwebm-dev \
++        2>&1 | tail -8
++fi
++
+-LIBHEIF_DIR="$ROOT/external/libheif"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    LIBHEIF_DIR="${PRUVA_REPRO_CACHE_DIR}/libheif-v1.21.2-v1.22.0-asan-$(uname -m)-1"
++    echo "[BUILD] Using libheif setup cache: $LIBHEIF_DIR"
++else
++    LIBHEIF_DIR="$ROOT/external/libheif"
++fi
+ POC_SRC="$ROOT/repro/poc.c"
+ POC_BIN="$ROOT/repro/poc"
+ POC_FILE="$ROOT/repro/poc.heif"
+ MANIFEST="$ROOT/repro/runtime_manifest.json"
+ 
++if [ ! -d "$LIBHEIF_DIR/.git" ]; then
++    echo "[BUILD] Cloning libheif source..."
++    mkdir -p "$(dirname "$LIBHEIF_DIR")"
++    git clone --depth=100 https://github.com/strukturag/libheif.git "$LIBHEIF_DIR"
++fi
++
++cd "$LIBHEIF_DIR"
++git fetch --depth=1 origin \
++    refs/tags/v1.21.2:refs/tags/v1.21.2 \
++    refs/tags/v1.22.0:refs/tags/v1.22.0
++cd "$ROOT"
++
+ # Build vulnerable version if needed
+ if [ ! -f "$LIBHEIF_DIR/build_vuln/libheif/libheif.so" ]; then
+     echo "[BUILD] Building vulnerable libheif v1.21.2 with ASan..."
