@@ -70,8 +70,7 @@ jobs:
 
           for REPRO_ID in $REPROS; do
             BRANCH="repro/$REPRO_ID"
-            REPRO_JSON=$(curl -sf "$API_URL/reproductions/$REPRO_ID" || echo "{}")
-            EXPECTED_IMAGE=$(echo "$REPRO_JSON" | jq -r --arg default_image "$DEFAULT_SANDBOX_IMAGE" '.environment.sandbox_image // $default_image')
+            EXPECTED_IMAGE="$DEFAULT_SANDBOX_IMAGE"
 
             # Check if branch exists and if it's properly configured
             if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
@@ -99,9 +98,7 @@ jobs:
               git fetch origin "$BRANCH:$BRANCH"
               git checkout "$BRANCH"
 
-              # Update devcontainer.json to set correct REPRO_ID and pinned image.
-              # Prefer the image that the worker recorded; fall back to the production default
-              # so older API records do not keep Codespaces on :latest.
+              # Update devcontainer.json to set correct REPRO_ID and public pinned image.
               tmp_devcontainer=$(mktemp)
               jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" --arg cache_dir "$REPRO_CACHE_DIR" --arg docker_api "$DOCKER_API_VERSION" \
                 '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].dockerDashComposeVersion = "none" | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .containerEnv.PRUVA_REPRO_CACHE_DIR = $cache_dir | .containerEnv.DOCKER_API_VERSION = $docker_api | .image = $image' \
@@ -127,7 +124,7 @@ jobs:
             # Create branch from main
             git checkout -b "$BRANCH" origin/main
 
-            # Update devcontainer.json to set REPRO_ID and pinned image.
+            # Update devcontainer.json to set REPRO_ID and public pinned image.
             tmp_devcontainer=$(mktemp)
             jq --arg repro_id "$REPRO_ID" --arg api_url "$API_URL" --arg image "$EXPECTED_IMAGE" --arg cache_dir "$REPRO_CACHE_DIR" --arg docker_api "$DOCKER_API_VERSION" \
               '.features //= {} | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby = false | .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].dockerDashComposeVersion = "none" | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest" | .containerEnv.REPRO_ID = $repro_id | .containerEnv.PRUVA_API_URL = $api_url | .containerEnv.PRUVA_SANDBOX_IMAGE = $image | .containerEnv.PRUVA_REPRO_CACHE_DIR = $cache_dir | .containerEnv.DOCKER_API_VERSION = $docker_api | .image = $image' \

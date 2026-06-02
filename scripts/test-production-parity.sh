@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Verify that pruva production execution, Codespaces, and optional Modal smoke
-# all use the same pinned pruva-sandbox image contract.
+# Verify that pruva-generated public repro branches work in the sandbox paths
+# used by operators: Codespaces first, optional Modal smoke, and optional
+# image-backed production metadata.
 #
 set -euo pipefail
 
@@ -32,7 +33,7 @@ CODESPACES_READINESS_MAX_PARALLEL_EXPLICIT=false
 CODESPACES_READINESS_MAX_PARALLEL="${CODESPACES_READINESS_MAX_PARALLEL:-$CODESPACES_MAX_PARALLEL}"
 RUN_MODAL=auto
 RUN_MANIFEST=true
-RUN_ROLLOUT_PROOF=true
+RUN_ROLLOUT_PROOF=false
 ROLLOUT_PROOF_MIN_MATCHING="${PRUVA_ROLLOUT_PROOF_MIN_MATCHING:-1}"
 ROLLOUT_PROOF_MAX_PARALLEL="${PRUVA_ROLLOUT_PROOF_MAX_PARALLEL:-8}"
 ROLLOUT_PROOF_REPRO_IDS="${PRUVA_ROLLOUT_PROOF_REPRO_IDS:-}"
@@ -65,7 +66,8 @@ OPTIONS:
                            Max concurrent structural Codespaces readiness checks
                            (default: ${CODESPACES_READINESS_MAX_PARALLEL})
     --skip-manifest         Skip registry manifest resolution for the pinned image
-    --skip-rollout-proof    Skip production API environment.sandbox_image proof
+    --require-rollout-proof Require production API environment.sandbox_image proof
+    --skip-rollout-proof    Deprecated no-op; rollout proof is optional by default
     --rollout-proof-repro-ids IDS
                            Comma-separated post-deploy repro IDs to inspect for
                            environment.sandbox_image. Defaults to latest-N.
@@ -84,10 +86,9 @@ OPTIONS:
 ENVIRONMENT:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required only when Modal runs.
     PRUVA_SANDBOX_IMAGE can also be used instead of --sandbox-image.
-    PRUVA_ROLLOUT_PROOF_REPRO_IDS can provide post-deploy repro IDs.
+    PRUVA_ROLLOUT_PROOF_REPRO_IDS can provide post-deploy repro IDs when
+    --require-rollout-proof is used.
     PRUVA_ROLLOUT_PROOF_MIN_MATCHING can configure required API proof count.
-    PRUVA_API_TOKEN can provide admin access for active worker sandbox-image
-    proof through /v1/workers when reproduction records have not rolled yet.
     CODESPACES_MODE, CODESPACES_MAX_PARALLEL, and
     CODESPACES_READINESS_MAX_PARALLEL can configure Codespaces defaults.
     PRUVA_ROLLOUT_PROOF_MAX_PARALLEL can configure rollout proof concurrency.
@@ -97,9 +98,9 @@ ENVIRONMENT:
 
 WHAT IT VALIDATES:
     1. public/private repository boundary for tracked sandbox files
-    2. pruva worker/docker image pinning through make sandbox-image-check
+    2. pruva handoff/image pinning through make sandbox-image-check
     3. optional GHCR manifest resolution for the pinned sandbox digest
-    4. production API rollout proof for environment.sandbox_image
+    4. optional production API rollout proof for image-backed executors
     5. pruva-sandbox latest-N Codespaces readiness against the same digest
     6. optional real Codespaces startup verification for latest-N repros
     7. optional Modal pruva-verify smoke against the same digest using the image binary
@@ -174,6 +175,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-rollout-proof)
       RUN_ROLLOUT_PROOF=false
+      shift
+      ;;
+    --require-rollout-proof)
+      RUN_ROLLOUT_PROOF=true
       shift
       ;;
     --rollout-proof-repro-ids)

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
-# test-codespaces.sh - Validate that repro branches are correctly configured
-#                      and their reproduction scripts are downloadable from the Pruva API.
+# test-codespaces.sh - Validate that repro branches are correctly configured,
+#                      patch-capable, and their reproduction scripts are
+#                      downloadable from the Pruva API.
 #
 # This simulates what happens when a Codespace starts:
 #   1. devcontainer.json is read for REPRO_ID
-#   2. devcontainer image is checked against API sandbox metadata, when present
-#   3. pruva-verify fetches metadata from the API
-#   4. The reproduction script is downloaded
+#   2. pruva-verify fetches metadata from the API
+#   3. the reproduction script is downloaded
+#   4. public repro-patches/<REPRO_ID>.patch can be applied at runtime when present
 #
 # Usage:
 #   ./scripts/test-codespaces.sh                    # Test latest 10 published API reproductions
@@ -33,7 +34,9 @@ LATEST_SOURCE="api"
 TEST_ALL=false
 SINGLE_BRANCH=""
 DOWNLOAD_SCRIPT=true
+REQUIRE_METADATA_IMAGE=false
 MAX_PARALLEL="${CODESPACES_READINESS_MAX_PARALLEL:-4}"
+CURL_RETRY_ARGS=(--retry 3 --retry-delay 1 --retry-connrefused)
 
 usage() {
   cat <<EOF
@@ -48,6 +51,9 @@ ${BOLD}OPTIONS:${NC}
     --all              Test ALL repro branches
     --branch NAME      Test a single branch (e.g. repro/REPRO-2026-00105)
     --no-download      Skip downloading the reproduction script (metadata only)
+    --require-metadata-image
+                       Require devcontainer image to match API
+                       environment.sandbox_image when present
     --api-url URL      Override the Pruva API URL
     --max-parallel N   Validate up to N branches concurrently (default: ${MAX_PARALLEL})
     -h, --help         Show this help message
@@ -56,10 +62,11 @@ ${BOLD}WHAT IT VALIDATES:${NC}
     1. Branch has a valid devcontainer.json
     2. devcontainer.json contains a non-empty REPRO_ID
     3. REPRO_ID in devcontainer.json matches the branch name
-    4. devcontainer image matches metadata.environment.sandbox_image, or the pinned default when metadata is absent
+    4. devcontainer image is immutable and exposes PRUVA_SANDBOX_IMAGE
     5. Pruva API returns metadata for the REPRO_ID
     6. Metadata contains a reproduction_script artifact
     7. The reproduction script is downloadable and non-empty
+    8. Any tracked public repro-patches/<REPRO_ID>.patch applies cleanly
 EOF
 }
 
@@ -86,6 +93,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-download)
       DOWNLOAD_SCRIPT=false
+      shift
+      ;;
+    --require-metadata-image)
+      REQUIRE_METADATA_IMAGE=true
       shift
       ;;
     --api-url)
@@ -132,7 +143,7 @@ fetch_latest_api_repro_ids() {
   local count="$1"
   local tmp_meta http_code
   tmp_meta=$(mktemp)
-  http_code=$(curl -sf -w "%{http_code}" -o "$tmp_meta" "${API_URL}/reproductions?status=published&limit=${count}" 2>/dev/null) || http_code="000"
+  http_code=$(curl "${CURL_RETRY_ARGS[@]}" -sf -w "%{http_code}" -o "$tmp_meta" "${API_URL}/reproductions?status=published&limit=${count}" 2>/dev/null) || http_code="000"
   if [[ "$http_code" != "200" ]]; then
     rm -f "$tmp_meta"
     echo "Failed to fetch latest reproductions from API (HTTP ${http_code})" >&2
@@ -140,6 +151,116 @@ fetch_latest_api_repro_ids() {
   fi
   jq -r '.reproductions[]?.repro_id // empty' "$tmp_meta"
   rm -f "$tmp_meta"
+}
+
+normalize_artifact_path() {
+  local path="$1"
+  path="${path#bundle/}"
+  printf '%s\n' "$path"
+}
+
+check_branch_patch_applies() {
+  local branch="$1"
+  local repro_id="$2"
+  local script_path="$3"
+  local patch_path="repro-patches/${repro_id}.patch"
+  local patch_source=""
+
+  if git cat-file -e "${branch}:${patch_path}" 2>/dev/null; then
+    patch_source="branch"
+  elif [[ -f "$patch_path" ]]; then
+    patch_source="main"
+  else
+    pass "No branch-local repro patch required"
+    return 0
+  fi
+
+  local tmp_dir patch_file dl_code
+  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/pruva-patch-check.XXXXXX")
+  patch_file="${tmp_dir}/${repro_id}.patch"
+
+  if [[ "$patch_source" == "branch" ]]; then
+    git show "${branch}:${patch_path}" >"$patch_file"
+  else
+    cp "$patch_path" "$patch_file"
+  fi
+  local -a patch_existing_targets=()
+  while IFS= read -r target; do
+    [[ -n "$target" ]] && patch_existing_targets+=("$target")
+  done < <(
+    sed -nE 's#^---[[:space:]]+([^[:space:]]+).*#\1#p' "$patch_file" \
+      | sed -E 's#^[ab]/##' \
+      | grep -v '^/dev/null$' \
+      | sort -u
+  )
+
+  local -a patch_output_targets=()
+  while IFS= read -r target; do
+    [[ -n "$target" ]] && patch_output_targets+=("$target")
+  done < <(
+    sed -nE 's#^\+\+\+[[:space:]]+([^[:space:]]+).*#\1#p' "$patch_file" \
+      | sed -E 's#^[ab]/##' \
+      | grep -v '^/dev/null$' \
+      | sort -u
+  )
+
+  local -a metadata_artifacts=()
+  while IFS= read -r artifact_path; do
+    [[ -n "$artifact_path" ]] && metadata_artifacts+=("$artifact_path")
+  done < <(
+    {
+      printf '%s\n' "$script_path"
+      echo "$metadata" | jq -r '.artifacts[]?.path // empty'
+    } | sort -u
+  )
+
+  local -a artifact_paths=()
+  local target artifact_path artifact_rel artifact_url matched
+  for target in "${patch_existing_targets[@]}"; do
+    matched=false
+    for artifact_path in "${metadata_artifacts[@]}"; do
+      artifact_rel="$(normalize_artifact_path "$artifact_path")"
+      if [[ "$artifact_rel" == "$target" ]]; then
+        artifact_paths+=("$artifact_path")
+        matched=true
+      fi
+    done
+    if [[ "$matched" != true ]]; then
+      rm -rf "$tmp_dir"
+      fail "Cannot check ${patch_path}: patch target ${target} is not present in API artifacts"
+      return 1
+    fi
+  done
+
+  if [[ ${#artifact_paths[@]} -eq 0 ]]; then
+    artifact_paths=("$script_path")
+  fi
+
+  for artifact_path in "${artifact_paths[@]}"; do
+    artifact_rel="$(normalize_artifact_path "$artifact_path")"
+    artifact_url="${API_URL}/reproductions/${repro_id}/artifacts/${artifact_path}"
+    mkdir -p "${tmp_dir}/$(dirname "$artifact_rel")"
+    dl_code=$(curl "${CURL_RETRY_ARGS[@]}" -sf -w "%{http_code}" -o "${tmp_dir}/${artifact_rel}" "$artifact_url" 2>/dev/null) || dl_code="000"
+    if [[ "$dl_code" != "200" ]]; then
+      rm -rf "$tmp_dir"
+      fail "Cannot check ${patch_path}: artifact ${artifact_path} download failed (HTTP ${dl_code})"
+      return 1
+    fi
+  done
+
+  for target in "${patch_output_targets[@]}"; do
+    mkdir -p "${tmp_dir}/$(dirname "$target")"
+  done
+
+  if patch --dry-run -p0 --directory "$tmp_dir" <"$patch_file" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    pass "Public ${patch_source} repro patch applies cleanly: ${patch_path}"
+    return 0
+  fi
+
+  rm -rf "$tmp_dir"
+  fail "Public ${patch_source} repro patch no longer applies to API script: ${patch_path}"
+  return 1
 }
 
 # Test a single branch
@@ -204,7 +325,7 @@ test_branch() {
   local metadata http_code
   local tmp_meta
   tmp_meta=$(mktemp)
-  http_code=$(curl -sf -w "%{http_code}" -o "$tmp_meta" "${API_URL}/reproductions/${repro_id}" 2>/dev/null) || http_code="000"
+  http_code=$(curl "${CURL_RETRY_ARGS[@]}" -sf -w "%{http_code}" -o "$tmp_meta" "${API_URL}/reproductions/${repro_id}" 2>/dev/null) || http_code="000"
   metadata=$(cat "$tmp_meta" 2>/dev/null || echo "")
   rm -f "$tmp_meta"
 
@@ -215,13 +336,14 @@ test_branch() {
   fi
   pass "API metadata fetched (HTTP 200)"
 
-  # Step 7: Check Codespaces image pinning and parity with reproduction metadata when available
+  # Step 7: Check Codespaces image pinning. Reproduction metadata may describe
+  # a different executor; patch portability is the production invariant here.
   local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby docker_compose_mode sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
   metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
-  expected_image="${metadata_image:-$DEFAULT_SANDBOX_IMAGE}"
+  expected_image="$DEFAULT_SANDBOX_IMAGE"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
   docker_moby=$(echo "$devcontainer" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
   docker_compose_mode=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].dockerDashComposeVersion // "unset"')
@@ -240,15 +362,23 @@ test_branch() {
   elif [[ "$devcontainer_image" == *":latest" ]]; then
     fail "Codespaces image must be immutable; found '${devcontainer_image}'"
     errors=$((errors + 1))
-  elif [[ "$devcontainer_image" != "$expected_image" ]]; then
-    fail "Codespaces image mismatch: devcontainer has '${devcontainer_image}', expected '${expected_image}'"
+  elif [[ "$devcontainer_image" != "$DEFAULT_SANDBOX_IMAGE" ]]; then
+    fail "Codespaces image mismatch: devcontainer has '${devcontainer_image}', expected pinned default '${DEFAULT_SANDBOX_IMAGE}'"
     errors=$((errors + 1))
   else
-    if [[ -n "$metadata_image" ]]; then
-      pass "Codespaces image matches metadata sandbox_image"
+    pass "Codespaces image uses pinned default sandbox image"
+  fi
+
+  if [[ -n "$metadata_image" && "$metadata_image" != "$devcontainer_image" ]]; then
+    if [[ "$REQUIRE_METADATA_IMAGE" == "true" ]]; then
+      fail "metadata sandbox_image differs from Codespaces image: metadata has '${metadata_image}', devcontainer has '${devcontainer_image}'"
+      errors=$((errors + 1))
     else
-      pass "Codespaces image uses pinned default sandbox image"
+      warn "metadata sandbox_image differs from Codespaces image: metadata has '${metadata_image}', devcontainer has '${devcontainer_image}'"
+      warnings=$((warnings + 1))
     fi
+  elif [[ -n "$metadata_image" ]]; then
+    pass "metadata sandbox_image matches Codespaces image"
   fi
 
   if [[ "$devcontainer_env_image" != "$devcontainer_image" ]]; then
@@ -321,13 +451,18 @@ test_branch() {
   fi
   pass "Reproduction script: ${script_path}"
 
-  # Step 10: Download the reproduction script
+  # Step 10: Check branch-local patch applicability before execution.
+  if ! check_branch_patch_applies "$branch" "$repro_id" "$script_path"; then
+    errors=$((errors + 1))
+  fi
+
+  # Step 11: Download the reproduction script
   if [[ "$DOWNLOAD_SCRIPT" == "true" ]]; then
     local script_url="${API_URL}/reproductions/${repro_id}/artifacts/${script_path}"
     local tmp_script
     tmp_script=$(mktemp)
     local dl_code
-    dl_code=$(curl -sf -w "%{http_code}" -o "$tmp_script" "$script_url" 2>/dev/null) || dl_code="000"
+    dl_code=$(curl "${CURL_RETRY_ARGS[@]}" -sf -w "%{http_code}" -o "$tmp_script" "$script_url" 2>/dev/null) || dl_code="000"
     local script_size
     script_size=$(wc -c < "$tmp_script" 2>/dev/null || echo "0")
     rm -f "$tmp_script"
