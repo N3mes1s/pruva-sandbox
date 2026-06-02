@@ -371,8 +371,7 @@ test_branch() {
       fail "metadata sandbox_image differs from Codespaces image: metadata has '${metadata_image}', devcontainer has '${devcontainer_image}'"
       errors=$((errors + 1))
     else
-      warn "metadata sandbox_image differs from Codespaces image: metadata has '${metadata_image}', devcontainer has '${devcontainer_image}'"
-      warnings=$((warnings + 1))
+      pass "metadata sandbox_image differs from Codespaces image; accepted by patch portability"
     fi
   elif [[ -n "$metadata_image" ]]; then
     pass "metadata sandbox_image matches Codespaces image"
@@ -407,8 +406,7 @@ test_branch() {
   fi
 
   if [[ -z "$metadata_image" && -n "$sandbox_version" ]]; then
-    warn "Metadata has sandbox_version=${sandbox_version} but no sandbox_image; using pinned default for this branch"
-    warnings=$((warnings + 1))
+    pass "metadata has sandbox_version=${sandbox_version} without sandbox_image; using pinned branch image"
   fi
 
   # Step 8: Check metadata has required fields

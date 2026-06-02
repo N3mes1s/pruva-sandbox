@@ -23,6 +23,33 @@ No private `pruva` source, private binaries, API tokens, Modal credentials, or
 operator secrets belong in this repository, in reproduction branches, or in
 patch files.
 
+## Operator Flow From `~/code/pruva`
+
+The private checkout at `~/code/pruva` is the operator and publisher. This
+public repository is the user-facing execution surface. Production readiness
+means a Codespace opened from the public branch can run from public inputs only:
+
+1. An operator runs generation, verification, or publish commands from
+   `~/code/pruva`.
+2. `pruva` uploads the reproduction metadata and artifacts to the Pruva API.
+3. `pruva` creates or updates `N3mes1s/pruva-sandbox:repro/<REPRO_ID>`.
+4. That branch carries the public `.devcontainer/devcontainer.json` with
+   `containerEnv.REPRO_ID=<REPRO_ID>` and an immutable public sandbox image
+   digest.
+5. If the API artifact needs a public portability fix, the matching
+   `repro-patches/<REPRO_ID>.patch` must be committed on the same
+   `repro/<REPRO_ID>` branch.
+6. A user opens the Codespace from the branch; Codespaces clones only this
+   public repository and starts the devcontainer.
+7. `pruva-verify` fetches the script from the public API, applies the
+   branch-local public patch when present, runs the reproduction, and writes
+   results.
+
+The private checkout may run different executors while creating a reproduction.
+That does not weaken the public contract. The public Codespaces path is ready
+only when the public branch, public API artifacts, public patch, and pinned
+public image are enough to reproduce the result without the private repository.
+
 ## Patch Portability Invariant
 
 Production reproductions may be generated or first exercised in environments

@@ -11,6 +11,16 @@ Isolated environment for running [Pruva](https://pruva.dev) vulnerability reprod
 3. The script runs automatically inside the sandboxed container
 4. Results are reported with pass/fail status, timing, and logs
 
+## Production Handoff
+
+`~/code/pruva` is the private operator and publisher. This public repository is
+the Codespaces execution surface. A production repro is ready only when the
+public `repro/<REPRO_ID>` branch, public API artifact, branch-local public patch
+when needed, and pinned `ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>` image are
+enough to run without private source, tokens, or binaries.
+
+See [docs/PRODUCTION.md](docs/PRODUCTION.md) for the full contract and gates.
+
 ## Quick Start
 
 Click "Open in Codespaces" on any reproduction at [pruva.dev](https://pruva.dev/reproductions).

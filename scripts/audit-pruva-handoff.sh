@@ -166,7 +166,7 @@ check_pruva_contract_in_ref() {
     return
   fi
 
-  ref_contains "ref pins worker sandbox image by digest" "$ref" \
+  ref_contains "ref pins public sandbox image by digest" "$ref" \
     "pruva-rs/Dockerfile" \
     '^ARG PRUVA_SANDBOX_IMAGE=ghcr\.io/n3mes1s/pruva-sandbox@sha256:[0-9a-f]{64}$'
   ref_contains "ref has sandbox image pinning make target" "$ref" \
@@ -195,7 +195,7 @@ check_pruva_contract_in_ref() {
 check_pruva_contract_in_worktree() {
   local root="$1"
   log "Checking local private pruva working tree"
-  file_contains "local pins worker sandbox image by digest" \
+  file_contains "local pins public sandbox image by digest" \
     "$root/pruva-rs/Dockerfile" \
     '^ARG PRUVA_SANDBOX_IMAGE=ghcr\.io/n3mes1s/pruva-sandbox@sha256:[0-9a-f]{64}$'
   file_contains "local has sandbox image pinning make target" \
