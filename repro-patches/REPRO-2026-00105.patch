@@ -6,9 +6,9 @@
  
 +# Clone and build vulnerable fabric.js if not present
 +if [ ! -f "$ROOT/repro/fabric.js/dist/index.node.cjs" ]; then
-+  echo "[*] Cloning fabric.js v7.1.0 (vulnerable)..."
++  echo "[*] Cloning fabric.js v710 (vulnerable)..."
 +  mkdir -p "$ROOT/repro"
-+  git clone --depth 1 --branch v7.1.0 https://github.com/fabricjs/fabric.js.git "$ROOT/repro/fabric.js" 2>&1 | tail -3
++  git clone --depth 1 --branch v710 https://github.com/fabricjs/fabric.js.git "$ROOT/repro/fabric.js" 2>&1 | tail -3
 +  echo "[*] Installing dependencies..."
 +  cd "$ROOT/repro/fabric.js"
 +  npm install 2>&1 | tail -5
