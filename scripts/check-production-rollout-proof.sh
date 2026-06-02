@@ -20,6 +20,7 @@ LATEST=20
 MIN_MATCHING=1
 MAX_PARALLEL="${PRUVA_ROLLOUT_PROOF_MAX_PARALLEL:-8}"
 REQUIRE_ALL=false
+REQUIRE_WORKER_PROOF=false
 REPRO_IDS=()
 
 usage() {
@@ -46,6 +47,8 @@ OPTIONS:
     --max-parallel N        Inspect up to N reproduction detail records concurrently
                              (default: ${MAX_PARALLEL})
     --require-all           Require every inspected record to expose the exact image.
+    --require-worker-proof  Require at least one active worker to expose the
+                             exact image in capabilities.sandbox_image.
     -h, --help              Show this help.
 
 WHAT IT VALIDATES:
@@ -179,6 +182,10 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_ALL=true
       shift
       ;;
+    --require-worker-proof)
+      REQUIRE_WORKER_PROOF=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -202,6 +209,9 @@ case "$API_TOKEN_HEADER" in
   auto|x-api-key|authorization) ;;
   *) fail "--api-token-header must be auto, x-api-key, or authorization" ;;
 esac
+if [[ "$REQUIRE_WORKER_PROOF" == true && -z "$API_TOKEN" ]]; then
+  fail "--require-worker-proof needs --api-token or PRUVA_API_TOKEN"
+fi
 
 if [[ ${#REPRO_IDS[@]} -eq 0 ]]; then
   while IFS= read -r repro_id; do
@@ -347,6 +357,10 @@ log "Reproduction summary: ${matching} matching, ${missing} missing, ${mismatche
 log "Worker summary: ${worker_matching} matching, ${worker_missing} missing, ${worker_mismatched} different, ${worker_fetch_failed} fetch failed"
 
 proof_matching=$((matching + worker_matching))
+
+if [[ "$REQUIRE_WORKER_PROOF" == true && "$worker_matching" -lt 1 ]]; then
+  fail "--require-worker-proof set but no active worker exposes the promoted image"
+fi
 
 if [[ "$proof_matching" -lt "$MIN_MATCHING" ]]; then
   fail "Need at least ${MIN_MATCHING} production proof record(s) with matching sandbox image"
