@@ -80,7 +80,9 @@ before the next reproduction record is created:
 
 ```bash
 PRUVA_API_TOKEN='pak_...' \
-  ./scripts/test-production-parity.sh --skip-modal
+  ./scripts/check-production-rollout-proof.sh \
+    --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest> \
+    --require-worker-proof
 ```
 
 If the post-deploy reproduction ID is known, check that record directly:
