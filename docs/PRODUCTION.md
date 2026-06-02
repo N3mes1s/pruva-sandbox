@@ -56,6 +56,7 @@ Patch files must:
 - keep dependencies and one-off tooling scoped to the repro that needs them;
 - avoid broad devcontainer changes for single-repro issues;
 - avoid embedding secrets, private repository references, or private binaries;
+- exist on the matching `repro/<REPRO_ID>` branch, not only on `main`;
 - prefer reusable setup caches only for expensive setup artifacts, not for final
   vulnerability state;
 - preserve fresh final verification on every run.
@@ -91,6 +92,12 @@ Run the public boundary check directly when reviewing patch-only changes:
 
 ```bash
 ./scripts/check-public-boundary.sh
+```
+
+Run the branch patch sync check after adding or changing any public repro patch:
+
+```bash
+./scripts/check-repro-patch-branches.sh
 ```
 
 Audit whether a local private `pruva` checkout is safe to use as an operator
@@ -141,22 +148,23 @@ Before a sandbox image or patch set is production-ready:
 
 1. `git status --short --branch` is clean on `main`.
 2. `./scripts/check-public-boundary.sh` passes.
-3. `./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main`
+3. `./scripts/check-repro-patch-branches.sh` passes.
+4. `./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main`
    passes for any checkout used to publish or operate production runs.
-4. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
+5. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
    passes.
-5. `cargo test` passes under `pruva-verify-rs/`.
-6. `./scripts/test-production-parity.sh --skip-modal` passes.
-7. `./scripts/test-codespaces.sh --latest 20 --max-parallel 4` passes.
-8. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
+6. `cargo test` passes under `pruva-verify-rs/`.
+7. `./scripts/test-production-parity.sh --skip-modal` passes.
+8. `./scripts/test-codespaces.sh --latest 20 --max-parallel 4` passes.
+9. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-9. If the executor is image-backed, a post-deploy API record or authenticated
+10. If the executor is image-backed, a post-deploy API record or authenticated
    deploy check proves it is using the promoted `PRUVA_SANDBOX_IMAGE` digest.
-10. Any Modal smoke required for the release passes with credentials supplied
+11. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-11. No `repro-patches/` file contains tokens, private repo URLs, private binary
+12. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-12. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+13. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 

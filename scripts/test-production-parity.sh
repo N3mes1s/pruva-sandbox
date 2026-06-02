@@ -98,12 +98,13 @@ ENVIRONMENT:
 
 WHAT IT VALIDATES:
     1. public/private repository boundary for tracked sandbox files
-    2. pruva handoff/image pinning through make sandbox-image-check
-    3. optional GHCR manifest resolution for the pinned sandbox digest
-    4. optional production API rollout proof for image-backed executors
-    5. pruva-sandbox latest-N Codespaces readiness against the same digest
-    6. optional real Codespaces startup verification for latest-N repros
-    7. optional Modal pruva-verify smoke against the same digest using the image binary
+    2. every tracked repro patch is present on its public repro branch
+    3. pruva handoff/image pinning through make sandbox-image-check
+    4. optional GHCR manifest resolution for the pinned sandbox digest
+    5. optional production API rollout proof for image-backed executors
+    6. pruva-sandbox latest-N Codespaces readiness against the same digest
+    7. optional real Codespaces startup verification for latest-N repros
+    8. optional Modal pruva-verify smoke against the same digest using the image binary
 EOF
 }
 
@@ -251,6 +252,10 @@ fi
 log "Checking public sandbox boundary"
 "$SANDBOX_REPO/scripts/check-public-boundary.sh"
 pass "public sandbox boundary passed"
+
+log "Checking repro patch branch sync"
+"$SANDBOX_REPO/scripts/check-repro-patch-branches.sh"
+pass "repro patch branch sync passed"
 
 if [[ -n "$PRUVA_REF" ]]; then
   tmp_parent="${TMPDIR:-/tmp}"

@@ -100,6 +100,7 @@ pruva-verify CVE-2025-1716
 ├── repro-patches/              # Known-issue patches for specific reproductions
 ├── scripts/
 │   ├── test-codespaces.sh      # Branch validation (devcontainer, API, artifacts)
+│   ├── check-repro-patch-branches.sh # Patch presence on public repro branches
 │   ├── test_codespaces_modal.py# Full E2E tests via Modal sandboxes
 │   ├── test-production-parity.sh# pruva/Codespaces/Modal sandbox parity gate
 │   ├── detect-missing-deps.sh  # Failure log analysis for missing packages
@@ -178,6 +179,9 @@ PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
 
 # Public/private boundary check for patch-only changes.
 ./scripts/check-public-boundary.sh
+
+# Ensure every public patch is present on the repro branch Codespaces opens.
+./scripts/check-repro-patch-branches.sh
 
 # Local private pruva checkout readiness for publishing into Codespaces.
 ./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
