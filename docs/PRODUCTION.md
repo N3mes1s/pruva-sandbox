@@ -169,6 +169,20 @@ large Docker images; `3` is the default production recommendation. The cheaper
 structural branch check also runs with bounded parallelism, so latest-20
 validation should not serialize on API calls.
 
+For bulk runtime testing, create one warmed Codespace and run many IDs inside
+it:
+
+```bash
+./scripts/test-codespaces-bulk-gh.sh \
+  --latest 5 \
+  --per-repro-timeout 45m
+```
+
+This is faster when the image is the same and the goal is runtime verification.
+It does not replace branch-specific startup testing, because a single `main`
+Codespace does not prove that every `repro/<REPRO_ID>` branch has the correct
+`REPRO_ID` and postCreate behavior.
+
 ## Promotion Checklist
 
 Before a sandbox image or patch set is production-ready:

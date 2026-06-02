@@ -150,6 +150,11 @@ The test suite covers input validation, artifact path normalization, script sele
 # Latest-N real Codespaces execution with bounded parallelism.
 ./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3
 
+# Bulk runtime verification in one warmed Codespace. This is faster for
+# running many repro scripts, but it does not replace branch-specific startup
+# checks.
+./scripts/test-codespaces-bulk-gh.sh --latest 5 --per-repro-timeout 45m
+
 # Optional raw-container smoke test in CI. This does not apply devcontainer
 # features such as docker-outside-of-docker or sshd.
 gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
