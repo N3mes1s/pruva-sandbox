@@ -1,0 +1,68 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -6,7 +6,31 @@
+ LOGS="$ROOT/logs"
+ mkdir -p "$LOGS"
+ 
+-NOMAD_DIR="$ROOT/external/nomad"
++CACHE_DIR="${PRUVA_REPRO_CACHE_DIR:-}"
++if [ -n "$CACHE_DIR" ]; then
++    CACHE_DIR="$CACHE_DIR/nomad-v2.0.0-v2.0.1-$(uname -m)-1"
++    mkdir -p "$CACHE_DIR/go-build" "$CACHE_DIR/go-mod"
++    export GOCACHE="$CACHE_DIR/go-build"
++    export GOMODCACHE="$CACHE_DIR/go-mod"
++    echo "[+] Using Nomad setup cache: $CACHE_DIR"
++fi
++
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v go >/dev/null 2>&1; then
++    echo "[+] Installing Go..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq golang-go 2>&1 | tail -5
++fi
++
++if [ -n "$CACHE_DIR" ]; then
++    NOMAD_DIR="$CACHE_DIR/nomad"
++else
++    NOMAD_DIR="$ROOT/external/nomad"
++fi
+ VULN_TAG="v2.0.0"
+ FIXED_TAG="v2.0.1"
+ CONFIG="$LOGS/nomad_config.hcl"
+@@ -40,2 +64,8 @@
+-git fetch --depth=100 origin tag "$VULN_TAG" 2>/dev/null || true
+-git fetch --depth=100 origin tag "$FIXED_TAG" 2>/dev/null || true
++ensure_tag() {
++    local tag="$1"
++    if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
++        git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
++    fi
++}
++ensure_tag "$VULN_TAG"
++ensure_tag "$FIXED_TAG"
+@@ -44,3 +74,7 @@
+-echo "=== Building vulnerable binary ===" >&2
+-git -c advice.detachedHead=false checkout "$VULN_TAG"
+-go build -o bin/nomad-vuln .
++if [ ! -x bin/nomad-vuln ]; then
++    echo "=== Building vulnerable binary ===" >&2
++    git -c advice.detachedHead=false checkout "$VULN_TAG"
++    go build -o bin/nomad-vuln .
++else
++    echo "=== Reusing cached vulnerable binary ===" >&2
++fi
+@@ -48,3 +82,7 @@
+-echo "=== Building fixed binary ===" >&2
+-git -c advice.detachedHead=false checkout "$FIXED_TAG"
+-go build -o bin/nomad-fixed .
++if [ ! -x bin/nomad-fixed ]; then
++    echo "=== Building fixed binary ===" >&2
++    git -c advice.detachedHead=false checkout "$FIXED_TAG"
++    go build -o bin/nomad-fixed .
++else
++    echo "=== Reusing cached fixed binary ===" >&2
++fi
