@@ -1,0 +1,49 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -8,7 +8,28 @@
+ 
+ cd "$ROOT"
+ 
+-REPO_DIR="$ROOT/external/goshs"
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v go >/dev/null 2>&1; then
++    echo "[+] Installing Go..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq golang-go 2>&1 | tail -5
++fi
++
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/goshs-v2.0.1-v2.0.2-$(uname -m)-1"
++    mkdir -p "$CACHE_DIR/go-build" "$CACHE_DIR/go-mod"
++    export GOCACHE="$CACHE_DIR/go-build"
++    export GOMODCACHE="$CACHE_DIR/go-mod"
++    REPO_DIR="$CACHE_DIR/goshs"
++    echo "[*] Using goshs setup cache: $CACHE_DIR"
++else
++    REPO_DIR="$ROOT/external/goshs"
++fi
++
+ VULN_BIN="$REPO_DIR/goshs_v2.0.1"
+ FIXED_BIN="$REPO_DIR/goshs_v2.0.2"
+ 
+@@ -26,6 +47,16 @@
+ 
+ cd "$REPO_DIR"
+ 
++ensure_tag() {
++    local tag="$1"
++    if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
++        echo "[*] Fetching missing tag $tag"
++        git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
++    fi
++}
++ensure_tag v2.0.1
++ensure_tag v2.0.2
++
+ # Build vulnerable version
+ if [ ! -f "$VULN_BIN" ]; then
+     git checkout v2.0.1
