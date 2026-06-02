@@ -1,0 +1,27 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -8,6 +8,24 @@
+ 
+ cd "$REPRO"
+ 
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v go >/dev/null 2>&1; then
++    echo "[+] Installing Go..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq golang-go 2>&1 | tail -5
++fi
++
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/apko-v1.2.4-v1.2.5-$(uname -m)-1"
++    mkdir -p "$CACHE_DIR/go-build" "$CACHE_DIR/go-mod"
++    export GOCACHE="$CACHE_DIR/go-build"
++    export GOMODCACHE="$CACHE_DIR/go-mod"
++fi
++
+ VULN_TAG="v1.2.4"
+ FIX_TAG="v1.2.5"
+ 
