@@ -169,7 +169,8 @@ check_branch_patch_applies() {
   if git cat-file -e "${branch}:${patch_path}" 2>/dev/null; then
     patch_source="branch"
   elif [[ -f "$patch_path" ]]; then
-    patch_source="main"
+    fail "Public repro patch exists in this checkout but is missing from ${branch}: ${patch_path}"
+    return 1
   else
     pass "No branch-local repro patch required"
     return 0
@@ -179,11 +180,7 @@ check_branch_patch_applies() {
   tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/pruva-patch-check.XXXXXX")
   patch_file="${tmp_dir}/${repro_id}.patch"
 
-  if [[ "$patch_source" == "branch" ]]; then
-    git show "${branch}:${patch_path}" >"$patch_file"
-  else
-    cp "$patch_path" "$patch_file"
-  fi
+  git show "${branch}:${patch_path}" >"$patch_file"
   local -a patch_existing_targets=()
   while IFS= read -r target; do
     [[ -n "$target" ]] && patch_existing_targets+=("$target")
