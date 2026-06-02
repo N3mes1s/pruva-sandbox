@@ -1,0 +1,46 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -9,1 +9,12 @@
+ cd "$ROOT"
++
++SUDO=""
++if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
++    SUDO="sudo"
++fi
++
++if ! command -v autoreconf >/dev/null 2>&1; then
++    echo "[+] Installing autotools..."
++    $SUDO apt-get update -qq
++    $SUDO apt-get install -y -qq autoconf automake libtool 2>&1 | tail -5
++fi
+@@ -12,2 +23,12 @@
+-VULN_PREFIX="/tmp/wolfssl-vuln"
+-FIXED_PREFIX="/tmp/wolfssl-fixed"
++if [ -n "${PRUVA_REPRO_CACHE_DIR:-}" ]; then
++    CACHE_DIR="${PRUVA_REPRO_CACHE_DIR}/wolfssl-v5.9.0-v5.9.1-static-debug-$(uname -m)-1"
++    SOURCE_ROOT="$CACHE_DIR/src"
++    VULN_PREFIX="$CACHE_DIR/vuln"
++    FIXED_PREFIX="$CACHE_DIR/fixed"
++    mkdir -p "$SOURCE_ROOT"
++    echo "[+] Using wolfSSL setup cache: $CACHE_DIR"
++else
++    SOURCE_ROOT="$ROOT/external"
++    VULN_PREFIX="/tmp/wolfssl-vuln"
++    FIXED_PREFIX="/tmp/wolfssl-fixed"
++fi
+@@ -20,5 +41,5 @@
+-    if [ ! -d "$ROOT/external/wolfssl-vuln" ] || [ ! -d "$ROOT/external/wolfssl-fixed" ]; then
++    if [ ! -d "$SOURCE_ROOT/wolfssl-vuln" ] || [ ! -d "$SOURCE_ROOT/wolfssl-fixed" ]; then
+         echo "Cloning wolfSSL repositories..."
+-        rm -rf "$ROOT/external/wolfssl-vuln" "$ROOT/external/wolfssl-fixed"
+-        git clone --depth=1 --branch v5.9.0-stable https://github.com/wolfSSL/wolfssl.git "$ROOT/external/wolfssl-vuln" || true
+-        git clone --depth=1 --branch v5.9.1-stable https://github.com/wolfSSL/wolfssl.git "$ROOT/external/wolfssl-fixed" || true
++        rm -rf "$SOURCE_ROOT/wolfssl-vuln" "$SOURCE_ROOT/wolfssl-fixed"
++        git clone --depth=1 --branch v5.9.0-stable https://github.com/wolfSSL/wolfssl.git "$SOURCE_ROOT/wolfssl-vuln" || true
++        git clone --depth=1 --branch v5.9.1-stable https://github.com/wolfSSL/wolfssl.git "$SOURCE_ROOT/wolfssl-fixed" || true
+@@ -30,1 +51,1 @@
+-        cd "$ROOT/external/wolfssl-vuln"
++        cd "$SOURCE_ROOT/wolfssl-vuln"
+@@ -42,1 +63,1 @@
+-        cd "$ROOT/external/wolfssl-fixed"
++        cd "$SOURCE_ROOT/wolfssl-fixed"
