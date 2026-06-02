@@ -11,6 +11,16 @@ Isolated environment for running [Pruva](https://pruva.dev) vulnerability reprod
 3. The script runs automatically inside the sandboxed container
 4. Results are reported with pass/fail status, timing, and logs
 
+## Production Handoff
+
+`~/code/pruva` is the private operator and publisher. This public repository is
+the Codespaces execution surface. A production repro is ready only when the
+public `repro/<REPRO_ID>` branch, public API artifact, branch-local public patch
+when needed, and pinned `ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>` image are
+enough to run without private source, tokens, or binaries.
+
+See [docs/PRODUCTION.md](docs/PRODUCTION.md) for the full contract and gates.
+
 ## Quick Start
 
 Click "Open in Codespaces" on any reproduction at [pruva.dev](https://pruva.dev/reproductions).
@@ -100,6 +110,7 @@ pruva-verify CVE-2025-1716
 ├── repro-patches/              # Known-issue patches for specific reproductions
 ├── scripts/
 │   ├── test-codespaces.sh      # Branch validation (devcontainer, API, artifacts)
+│   ├── check-repro-patch-branches.sh # Patch presence on public repro branches
 │   ├── test_codespaces_modal.py# Full E2E tests via Modal sandboxes
 │   ├── test-production-parity.sh# pruva/Codespaces/Modal sandbox parity gate
 │   ├── detect-missing-deps.sh  # Failure log analysis for missing packages
@@ -173,31 +184,23 @@ uv run python scripts/test_codespaces_modal.py \
 PRUVA_SANDBOX_IMAGE='ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>' \
   uv run python scripts/test_codespaces_modal.py --latest 20
 
-# Pre-deploy structural parity gate.
-./scripts/test-production-parity.sh --skip-modal --skip-rollout-proof
-
-# Post-deploy production parity gate. Requires production API proof that at
-# least one reproduction was created with the promoted sandbox digest.
+# Structural parity gate for public repro branches and patch portability.
 ./scripts/test-production-parity.sh --skip-modal
 
 # Public/private boundary check for patch-only changes.
 ./scripts/check-public-boundary.sh
 
+# Ensure every public patch is present on the repro branch Codespaces opens.
+./scripts/check-repro-patch-branches.sh
+
 # Local private pruva checkout readiness for publishing into Codespaces.
 ./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
 
-# Direct rollout proof check when a post-deploy reproduction ID is known.
+# Optional image-backed rollout proof when an executor really used the promoted image.
 ./scripts/check-production-rollout-proof.sh \
   --repro-id REPRO-2026-00186 \
   --max-parallel 8 \
   --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
-
-# Add PRUVA_API_TOKEN to also inspect active workers for
-# capabilities.sandbox_image after the private worker rollout.
-PRUVA_API_TOKEN='pak_...' \
-  ./scripts/check-production-rollout-proof.sh \
-    --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest> \
-    --require-worker-proof
 
 # Production parity gate including real Codespaces startup verification.
 ./scripts/test-production-parity.sh \
@@ -225,7 +228,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them to the GitHub Release. The devcontainer image builds `pruva-verify` from the same checked-out source commit, so Codespaces and the `pruva-rs` worker image do not depend on a separate release being published first.
+This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them to the GitHub Release. The devcontainer image builds `pruva-verify` from the same checked-out source commit, so Codespaces does not depend on a separate release being published first.
 
 ## Docker-in-Docker for Special Cases
 

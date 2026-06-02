@@ -23,24 +23,53 @@ No private `pruva` source, private binaries, API tokens, Modal credentials, or
 operator secrets belong in this repository, in reproduction branches, or in
 patch files.
 
-## Image Invariant
+## Operator Flow From `~/code/pruva`
 
-The same immutable `ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>` must be used
-by:
+The private checkout at `~/code/pruva` is the operator and publisher. This
+public repository is the user-facing execution surface. Production readiness
+means a Codespace opened from the public branch can run from public inputs only:
+
+1. An operator runs generation, verification, or publish commands from
+   `~/code/pruva`.
+2. `pruva` uploads the reproduction metadata and artifacts to the Pruva API.
+3. `pruva` creates or updates `N3mes1s/pruva-sandbox:repro/<REPRO_ID>`.
+4. That branch carries the public `.devcontainer/devcontainer.json` with
+   `containerEnv.REPRO_ID=<REPRO_ID>` and an immutable public sandbox image
+   digest.
+5. If the API artifact needs a public portability fix, the matching
+   `repro-patches/<REPRO_ID>.patch` must be committed on the same
+   `repro/<REPRO_ID>` branch.
+6. A user opens the Codespace from the branch; Codespaces clones only this
+   public repository and starts the devcontainer.
+7. `pruva-verify` fetches the script from the public API, applies the
+   branch-local public patch when present, runs the reproduction, and writes
+   results.
+
+The private checkout may run different executors while creating a reproduction.
+That does not weaken the public contract. The public Codespaces path is ready
+only when the public branch, public API artifacts, public patch, and pinned
+public image are enough to reproduce the result without the private repository.
+
+## Patch Portability Invariant
+
+Production reproductions may be generated or first exercised in environments
+that are not the public Codespaces image. That is expected. The portable
+contract is the public repro branch plus `repro-patches/<REPRO_ID>.patch`, not a
+claim that every executor used the same Docker image.
+
+The public Codespaces branch must still pin an immutable
+`ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>` in:
 
 - `.devcontainer/devcontainer.json` as the Codespaces image.
 - `.devcontainer/devcontainer.json` `containerEnv.PRUVA_SANDBOX_IMAGE`.
-- the private Pruva worker image build argument.
-- reproduction metadata `environment.sandbox_image` when present.
 
-Do not use `:latest` for production Codespaces or worker execution. `latest` is
-only a development convenience and is not a production contract.
+Do not use `:latest` for production Codespaces. `latest` is only a development
+convenience and is not a production contract.
 
-For a worker/API rollout, code inspection is not enough. At least one
-post-deploy production reproduction must expose `environment.sandbox_image`
-matching the promoted digest, or an authenticated production admin/deploy check
-must prove that the worker image was rebuilt and restarted with the same
-`PRUVA_SANDBOX_IMAGE` value.
+`environment.sandbox_image` is useful evidence only for executors that actually
+run that image. If a reproduction happened somewhere else, production readiness
+is proven by running the public repro branch in the intended public environment,
+with any public patch applied.
 
 ## Patch Policy
 
@@ -54,49 +83,48 @@ Patch files must:
 - keep dependencies and one-off tooling scoped to the repro that needs them;
 - avoid broad devcontainer changes for single-repro issues;
 - avoid embedding secrets, private repository references, or private binaries;
+- exist on the matching `repro/<REPRO_ID>` branch, not only on `main`;
 - prefer reusable setup caches only for expensive setup artifacts, not for final
   vulnerability state;
 - preserve fresh final verification on every run.
 
 ## Production Gates
 
-Run the cheap structural gate first. This intentionally skips deploy proof so it
-can run before production has been rolled:
-
-```bash
-./scripts/test-production-parity.sh --skip-modal --skip-rollout-proof
-```
-
-After production is deployed, require API rollout proof. By default this checks
-the latest 20 published reproductions and requires at least one detail record to
-expose `environment.sandbox_image` with the promoted digest. If `PRUVA_API_TOKEN`
-is set to an admin-scoped API token, the same gate also checks active workers for
-`capabilities.sandbox_image` so a restarted worker can prove the live rollout
-before the next reproduction record is created:
+Run the cheap structural gate first:
 
 ```bash
 ./scripts/test-production-parity.sh --skip-modal
 ```
 
+Run the real public Codespaces startup gate before declaring latest
+reproductions healthy:
+
 ```bash
-PRUVA_API_TOKEN='pak_...' \
-  ./scripts/check-production-rollout-proof.sh \
-    --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest> \
-    --require-worker-proof
+./scripts/test-production-parity.sh \
+  --real-codespaces \
+  --codespaces-mode verify \
+  --codespaces-max-parallel 3 \
+  --readiness-max-parallel 3 \
+  --skip-modal
 ```
 
-If the post-deploy reproduction ID is known, check that record directly:
+Only require image-backed rollout proof when the executor actually used the
+promoted sandbox image and published `environment.sandbox_image`:
 
 ```bash
-./scripts/check-production-rollout-proof.sh \
-  --repro-id REPRO-2026-00186 \
-  --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
+./scripts/test-production-parity.sh --skip-modal --require-rollout-proof
 ```
 
 Run the public boundary check directly when reviewing patch-only changes:
 
 ```bash
 ./scripts/check-public-boundary.sh
+```
+
+Run the branch patch sync check after adding or changing any public repro patch:
+
+```bash
+./scripts/check-repro-patch-branches.sh
 ```
 
 Audit whether a local private `pruva` checkout is safe to use as an operator
@@ -106,16 +134,12 @@ execution path:
 ./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main
 ```
 
-Run the full public Codespaces startup gate before promoting a new sandbox
-digest or declaring latest reproductions healthy:
+If the image-backed reproduction ID is known, check that record directly:
 
 ```bash
-./scripts/test-production-parity.sh \
-  --real-codespaces \
-  --codespaces-mode verify \
-  --codespaces-max-parallel 3 \
-  --readiness-max-parallel 3 \
-  --skip-modal
+./scripts/check-production-rollout-proof.sh \
+  --repro-id REPRO-2026-00186 \
+  --sandbox-image ghcr.io/n3mes1s/pruva-sandbox@sha256:<digest>
 ```
 
 Run Modal only when the required credentials are exported:
@@ -142,8 +166,8 @@ For direct real Codespaces testing without the private `pruva` repo check:
 
 Use a small parallelism cap. Each lane creates a real Codespace and may pull
 large Docker images; `3` is the default production recommendation. The cheaper
-structural branch check and rollout-proof metadata fetches also run with bounded
-parallelism, so latest-20 validation should not serialize on API calls.
+structural branch check also runs with bounded parallelism, so latest-20
+validation should not serialize on API calls.
 
 ## Promotion Checklist
 
@@ -151,23 +175,23 @@ Before a sandbox image or patch set is production-ready:
 
 1. `git status --short --branch` is clean on `main`.
 2. `./scripts/check-public-boundary.sh` passes.
-3. `./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main`
+3. `./scripts/check-repro-patch-branches.sh` passes.
+4. `./scripts/audit-pruva-handoff.sh --pruva-repo ~/code/pruva --ref origin/main`
    passes for any checkout used to publish or operate production runs.
-4. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
+5. `bash -n scripts/test-codespaces-gh.sh scripts/test-production-parity.sh`
    passes.
-5. `cargo test` passes under `pruva-verify-rs/`.
-6. `./scripts/test-production-parity.sh --skip-modal` passes without
-   `--skip-rollout-proof`.
-7. `./scripts/test-codespaces.sh --latest 20 --max-parallel 4` passes.
-8. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
+6. `cargo test` passes under `pruva-verify-rs/`.
+7. `./scripts/test-production-parity.sh --skip-modal` passes.
+8. `./scripts/test-codespaces.sh --latest 20 --max-parallel 4` passes.
+9. `./scripts/test-codespaces-gh.sh --latest 20 --mode verify --max-parallel 3`
    passes or every failure has a linked issue with evidence.
-9. A post-deploy API record or authenticated production deploy check proves
-   the worker/API rollout is using the promoted `PRUVA_SANDBOX_IMAGE` digest.
-10. Any Modal smoke required for the release passes with credentials supplied
+10. If the executor is image-backed, a post-deploy API record or authenticated
+   deploy check proves it is using the promoted `PRUVA_SANDBOX_IMAGE` digest.
+11. Any Modal smoke required for the release passes with credentials supplied
    from the environment, never from command-line literals.
-11. No `repro-patches/` file contains tokens, private repo URLs, private binary
+12. No `repro-patches/` file contains tokens, private repo URLs, private binary
    references, or generated payload bytes.
-12. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
+13. No stale `pruva-smoke-*` or PR validation Codespaces remain after testing.
 
 ## Operational Notes
 
