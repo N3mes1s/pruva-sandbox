@@ -31,6 +31,6 @@
     "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374",
     "PRUVA_REPRO_CACHE_DIR": "/workspaces/pruva-sandbox/.pruva-repro-cache",
     "DOCKER_API_VERSION": "1.43",
-    "REPRO_ID": ""
+    "REPRO_ID": "REPRO-2026-00192"
   }
 }
