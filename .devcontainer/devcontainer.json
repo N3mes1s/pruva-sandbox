@@ -1,17 +1,16 @@
 {
-  "name": "Pruva Reproduction Environment",
-  "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
-  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-      "moby": false,
-      "dockerDashComposeVersion": "none"
-    },
-    "ghcr.io/devcontainers/features/sshd:1": {
-      "version": "latest"
-    }
+  "containerEnv": {
+    "DOCKER_API_VERSION": "1.43",
+    "PRUVA_API_URL": "https://api.pruva.dev/v1",
+    "PRUVA_REPRO_CACHE_DIR": "/workspaces/pruva-sandbox/.pruva-repro-cache",
+    "PRUVA_SANDBOX": "true",
+    "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
+    "REPRO_ID": "REPRO-2026-00210"
   },
   "customizations": {
+    "codespaces": {
+      "openFiles": []
+    },
     "vscode": {
       "extensions": [
         "ms-python.python"
@@ -19,18 +18,19 @@
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash"
       }
-    },
-    "codespaces": {
-      "openFiles": []
     }
   },
-  "remoteUser": "vscode",
-  "containerEnv": {
-    "PRUVA_SANDBOX": "true",
-    "PRUVA_API_URL": "https://api.pruva.dev/v1",
-    "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
-    "PRUVA_REPRO_CACHE_DIR": "/workspaces/pruva-sandbox/.pruva-repro-cache",
-    "DOCKER_API_VERSION": "1.43",
-    "REPRO_ID": ""
-  }
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "dockerDashComposeVersion": "none",
+      "moby": false
+    },
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
+  "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
+  "name": "Pruva Reproduction Environment",
+  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
+  "remoteUser": "vscode"
 }
