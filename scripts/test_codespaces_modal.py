@@ -40,6 +40,7 @@ import asyncio
 import base64
 import json
 import os
+from pathlib import Path
 import re
 import socket
 import ssl as _ssl_mod
@@ -51,14 +52,22 @@ from datetime import datetime
 
 sys.stdout.reconfigure(line_buffering=True)
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 API_URL = os.environ.get("PRUVA_API_URL", "https://api.pruva.dev/v1")
-DEFAULT_SANDBOX_IMAGE = os.environ.get(
-    "PRUVA_SANDBOX_IMAGE",
-    "ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374",
-)
 PROXY_URL = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", "")
 MAX_PARALLEL = 5  # Max concurrent sandboxes
 CACHE_MOUNT_PATH = "/tmp/pruva-cache"
+
+
+def _default_sandbox_image() -> str:
+    if image := os.environ.get("PRUVA_SANDBOX_IMAGE"):
+        return image
+
+    with (REPO_ROOT / ".devcontainer" / "devcontainer.json").open() as handle:
+        return json.load(handle)["image"]
+
+
+DEFAULT_SANDBOX_IMAGE = _default_sandbox_image()
 
 
 # ── Proxy tunnel support for grpclib ──
@@ -499,7 +508,7 @@ if __name__ == "__main__":
         "--sandbox-image",
         type=str,
         default=DEFAULT_SANDBOX_IMAGE,
-        help="pruva-sandbox image to test (default: PRUVA_SANDBOX_IMAGE or latest)",
+        help="pruva-sandbox image to test (default: PRUVA_SANDBOX_IMAGE or .devcontainer image)",
     )
     parser.add_argument(
         "--max-parallel",

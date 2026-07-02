@@ -44,8 +44,13 @@ jobs:
         id: scan
         env:
           API_URL: ${{ inputs.api_url }}
-          DEFAULT_SANDBOX_IMAGE: ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374
         run: |
+          DEFAULT_SANDBOX_IMAGE=$(jq -r '.image // empty' .devcontainer/devcontainer.json)
+          if ! echo "$DEFAULT_SANDBOX_IMAGE" | grep -Eq '^ghcr\.io/n3mes1s/pruva-sandbox@sha256:[0-9a-f]{64}$'; then
+            echo "Invalid default sandbox image in .devcontainer/devcontainer.json: ${DEFAULT_SANDBOX_IMAGE:-empty}" >&2
+            exit 1
+          fi
+
           echo "Fetching reproductions from $API_URL..."
           echo "Default sandbox image: $DEFAULT_SANDBOX_IMAGE"
           REPRO_CACHE_DIR="/workspaces/pruva-sandbox/.pruva-repro-cache"

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 
 use crate::display;
+
+const FAILURE_LOG_TAIL_LINES: usize = 20;
 
 /// Result of running a reproduction script.
 pub struct RunResult {
@@ -103,17 +105,7 @@ pub fn report_failure(work_dir: &Path, exit_code: i32, duration: u64) {
         list_dir_files(&logs_dir);
         println!();
 
-        let repro_log = logs_dir.join("repro.log");
-        if repro_log.exists() {
-            display::error("Last 20 lines of repro.log:");
-            if let Ok(content) = fs::read_to_string(&repro_log) {
-                let lines: Vec<&str> = content.lines().collect();
-                let start = lines.len().saturating_sub(20);
-                for line in &lines[start..] {
-                    println!("    {line}");
-                }
-            }
-        }
+        tail_log_files(&logs_dir, FAILURE_LOG_TAIL_LINES);
     }
 
     println!();
@@ -121,6 +113,59 @@ pub fn report_failure(work_dir: &Path, exit_code: i32, duration: u64) {
         "Results saved to: {}",
         work_dir.display().to_string().bold()
     ));
+}
+
+fn tail_log_files(logs_dir: &Path, max_lines: usize) {
+    let files = sorted_regular_files(logs_dir);
+    if files.is_empty() {
+        return;
+    }
+
+    for (index, file) in files.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("<unknown>");
+        display::error(&format!("Last {max_lines} lines of {name}:"));
+        match tail_file_lines(file, max_lines) {
+            Ok(lines) => {
+                for line in lines {
+                    println!("    {line}");
+                }
+            }
+            Err(error) => {
+                println!("    <failed to read {}: {error}>", file.display());
+            }
+        }
+    }
+}
+
+fn sorted_regular_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = match fs::read_dir(dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    files
+}
+
+fn tail_file_lines(path: &Path, max_lines: usize) -> std::io::Result<Vec<String>> {
+    let content = fs::read(path)?;
+    let content = String::from_utf8_lossy(&content);
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    Ok(lines[start..]
+        .iter()
+        .map(|line| (*line).to_string())
+        .collect())
 }
 
 fn show_logs_summary(work_dir: &Path) {
@@ -312,6 +357,42 @@ mod tests {
         fs::create_dir_all(&logs_dir).unwrap();
         fs::write(logs_dir.join("repro.log"), "only one line\n").unwrap();
         report_failure(dir.path(), 1, 3);
+    }
+
+    #[test]
+    fn report_failure_tails_all_regular_log_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(logs_dir.join("proftpd.log"), "daemon failed\n").unwrap();
+        fs::write(logs_dir.join("repro.log"), "wrapper failed\n").unwrap();
+        fs::create_dir(logs_dir.join("nested")).unwrap();
+
+        report_failure(dir.path(), 1, 3);
+    }
+
+    #[test]
+    fn sorted_regular_files_returns_sorted_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("zeta.log"), "z").unwrap();
+        fs::write(dir.path().join("alpha.log"), "a").unwrap();
+        fs::create_dir(dir.path().join("nested")).unwrap();
+
+        let names: Vec<String> = sorted_regular_files(dir.path())
+            .into_iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(names, vec!["alpha.log", "zeta.log"]);
+    }
+
+    #[test]
+    fn tail_file_lines_returns_only_requested_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("service.log");
+        fs::write(&log, "one\ntwo\nthree\n").unwrap();
+
+        assert_eq!(tail_file_lines(&log, 2).unwrap(), vec!["two", "three"]);
     }
 
     #[test]

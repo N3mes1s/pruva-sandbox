@@ -240,7 +240,7 @@ This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them t
 Some reproductions require specific OS versions, library versions, or network isolation. For these, use Docker-in-Docker:
 
 ```bash
-SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374}"
+SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-$(jq -r '.image' .devcontainer/devcontainer.json)}"
 
 docker run --rm \
   -e PRUVA_SANDBOX=true \

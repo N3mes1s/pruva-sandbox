@@ -27,8 +27,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 API_URL="${PRUVA_API_URL:-https://api.pruva.dev/v1}"
-DEFAULT_SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-ghcr.io/n3mes1s/pruva-sandbox@sha256:1aca6eb86791c66bb964b421dad5de27d5482953916280ee400fba160f87f374}"
+DEFAULT_SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-$(jq -r '.image // empty' "$REPO_ROOT/.devcontainer/devcontainer.json")}"
 LATEST=10
 LATEST_SOURCE="api"
 TEST_ALL=false
