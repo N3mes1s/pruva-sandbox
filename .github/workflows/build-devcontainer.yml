@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-devcontainer.yml'
-      - '.devcontainer/**'
-      - 'pruva-verify'
+      - '.devcontainer/Dockerfile'
+      - '.dockerignore'
       - 'pruva-verify-rs/**'
   workflow_dispatch:
+
+concurrency:
+  group: build-devcontainer-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
