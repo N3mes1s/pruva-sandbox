@@ -221,8 +221,19 @@ wait_for_codespace_ssh() {
   return 1
 }
 
+remote_pruva_verdict_exists() {
+  local codespace="$1"
+  local repro_id="$2"
+  local remote_script quoted_script
+
+  remote_script="test -f /workspaces/pruva-sandbox/pruva-results/${repro_id}/repro/validation_verdict.json"
+  printf -v quoted_script "%q" "$remote_script"
+  gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}" >/dev/null 2>&1
+}
+
 wait_for_codespace_post_create() {
   local codespace="$1"
+  local repro_id="$2"
   local deadline=$((SECONDS + 1800))
   local logs
   logs=$(mktemp)
@@ -234,6 +245,11 @@ wait_for_codespace_post_create() {
         return 0
       fi
     fi
+    if remote_pruva_verdict_exists "$codespace" "$repro_id"; then
+      rm -f "$logs"
+      log "Detected Pruva validation verdict for ${repro_id}"
+      return 0
+    fi
     log "Waiting for postCreateCommand in ${codespace}"
     sleep 10
   done
@@ -241,6 +257,40 @@ wait_for_codespace_post_create() {
   cat "$logs" >&2 || true
   rm -f "$logs"
   fail "Timed out waiting for postCreateCommand in Codespace ${codespace}"
+  return 1
+}
+
+verify_remote_pruva_result() {
+  local codespace="$1"
+  local repro_id="$2"
+  local base="/workspaces/pruva-sandbox/pruva-results/${repro_id}"
+  local verdict_file manifest_file
+  verdict_file=$(mktemp)
+  manifest_file=$(mktemp)
+
+  if ! gh codespace ssh --codespace "$codespace" -- "cat ${base}/repro/validation_verdict.json" >"$verdict_file"; then
+    rm -f "$verdict_file" "$manifest_file"
+    fail "No validation verdict for ${repro_id} in ${codespace}"
+    return 1
+  fi
+
+  echo "== validation_verdict =="
+  cat "$verdict_file"
+  echo
+
+  if gh codespace ssh --codespace "$codespace" -- "cat ${base}/repro/runtime_manifest.json" >"$manifest_file" 2>/dev/null; then
+    echo "== runtime_manifest =="
+    cat "$manifest_file"
+    echo
+  fi
+
+  if jq -e '.repro_result == "confirmed" and .end_to_end_target_reached == true' "$verdict_file" >/dev/null; then
+    rm -f "$verdict_file" "$manifest_file"
+    return 0
+  fi
+
+  rm -f "$verdict_file" "$manifest_file"
+  gh codespace ssh --codespace "$codespace" -- "if [ -d ${base}/logs ]; then echo '== logs tail ==' >&2; for log_file in ${base}/logs/*; do [ -f \"\$log_file\" ] || continue; echo \"---- \$log_file ----\" >&2; tail -n 40 \"\$log_file\" >&2 || true; done; fi" || true
   return 1
 }
 
@@ -269,15 +319,16 @@ verify_post_create_result() {
 
   if ! gh codespace logs --codespace "$codespace" >"$logs"; then
     rm -f "$logs"
-    fail "Could not fetch Codespace logs for ${codespace}"
-    return 1
+    log "Could not fetch Codespace logs for ${codespace}; checking Pruva result files"
+    verify_remote_pruva_result "$codespace" "$repro_id"
+    return
   fi
 
   if ! grep -q "$repro_id" "$logs"; then
-    cat "$logs" >&2 || true
     rm -f "$logs"
-    fail "postCreateCommand logs did not mention ${repro_id}"
-    return 1
+    log "postCreateCommand logs did not mention ${repro_id}; checking Pruva result files"
+    verify_remote_pruva_result "$codespace" "$repro_id"
+    return
   fi
 
   if grep -q "VERIFICATION SUCCESSFUL" "$logs"; then
@@ -292,10 +343,9 @@ verify_post_create_result() {
     return 1
   fi
 
-  cat "$logs" >&2 || true
   rm -f "$logs"
-  fail "postCreateCommand logs did not include a terminal pruva-verify result for ${repro_id}"
-  return 1
+  log "postCreateCommand logs did not include a terminal pruva-verify result for ${repro_id}; checking Pruva result files"
+  verify_remote_pruva_result "$codespace" "$repro_id"
 }
 
 test_one_repro() {
@@ -359,7 +409,7 @@ test_one_repro() {
         rm -f "$output_file"
         return 1
       fi
-      if ! wait_for_codespace_post_create "$codespace_name"; then
+      if ! wait_for_codespace_post_create "$codespace_name" "$repro_id"; then
         gh codespace logs --codespace "$codespace_name" || true
         delete_codespace "$codespace_name"
         rm -f "$output_file"
