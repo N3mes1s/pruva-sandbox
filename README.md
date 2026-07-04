@@ -2,7 +2,11 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/N3mes1s/pruva-sandbox)
 
-Isolated environment for running [Pruva](https://pruva.dev) vulnerability reproductions via GitHub Codespaces.
+Public Codespaces environment for running [Pruva](https://pruva.dev)
+verified CVE/GHSA vulnerability reproductions. Browse the public reproduction
+index at [pruva.dev/reproductions](https://pruva.dev/reproductions); each
+record has a permanent `REPRO-*` page, CVE/GHSA lookup URLs when available, and
+a plain-text agent-readable view.
 
 ## How It Works
 
