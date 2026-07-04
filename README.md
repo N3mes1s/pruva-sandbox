@@ -8,6 +8,9 @@ index at [pruva.dev/reproductions](https://pruva.dev/reproductions); each
 record has a permanent `REPRO-*` page, CVE/GHSA lookup URLs when available, and
 a plain-text agent-readable view.
 
+For crawler and agent entrypoints, see
+[SECURITY_REPRODUCTIONS.md](SECURITY_REPRODUCTIONS.md).
+
 ## How It Works
 
 1. Open a Codespace from a `repro/<REPRO_ID>` branch
