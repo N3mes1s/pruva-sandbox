@@ -57,6 +57,7 @@ jobs:
           DIND_FEATURE_KEY="ghcr.io/devcontainers/features/docker-in-docker:4"
           PRUVA_DIND_FEATURE_KEY="./features/pruva-dind-backend"
           PRUVA_DIND_FEATURE_DIR=".devcontainer/features/pruva-dind-backend"
+          POST_CREATE_COMMAND="trap '' TTIN TTOU; [ -n \"\$REPRO_ID\" ] && pruva-verify \"\$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'"
           DIND_FEATURE_JSON=$(jq -Sc --arg key "$DIND_FEATURE_KEY" '.features[$key] // empty' .devcontainer/devcontainer.json)
           if [ -z "$DIND_FEATURE_JSON" ]; then
             echo "Missing canonical $DIND_FEATURE_KEY feature in .devcontainer/devcontainer.json" >&2
@@ -91,6 +92,7 @@ jobs:
               --arg cache_dir "$REPRO_CACHE_DIR" \
               --arg dind_key "$DIND_FEATURE_KEY" \
               --arg pruva_dind_key "$PRUVA_DIND_FEATURE_KEY" \
+              --arg post_create "$POST_CREATE_COMMAND" \
               --argjson dind_feature "$DIND_FEATURE_JSON" \
               '
                 .features //= {}
@@ -105,6 +107,7 @@ jobs:
                 | .containerEnv.PRUVA_REPRO_CACHE_DIR = $cache_dir
                 | del(.containerEnv.DOCKER_API_VERSION)
                 | .image = $image
+                | .postCreateCommand = $post_create
               ' "$input_file" > "$output_file"
           }
 
@@ -134,6 +137,10 @@ jobs:
           fi
           if jq -e '.containerEnv | has("DOCKER_API_VERSION")' "$regression_out" >/dev/null; then
             echo "Regression failed: devcontainer rewrite preserved DOCKER_API_VERSION" >&2
+            exit 1
+          fi
+          if ! jq -e --arg post_create "$POST_CREATE_COMMAND" '.postCreateCommand == $post_create' "$regression_out" >/dev/null; then
+            echo "Regression failed: devcontainer rewrite did not set canonical postCreateCommand" >&2
             exit 1
           fi
           rm -f "$regression_in" "$regression_out"
@@ -168,6 +175,7 @@ jobs:
               CURRENT_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.image // empty')
               CURRENT_ENV_IMAGE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
               CURRENT_REPRO_CACHE_DIR=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.containerEnv.PRUVA_REPRO_CACHE_DIR // empty')
+              CURRENT_POST_CREATE=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.postCreateCommand // empty')
               CURRENT_HAS_DOCKER_API_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '(.containerEnv // {}) | has("DOCKER_API_VERSION")')
               CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
               CURRENT_DOCKER_OUTSIDE_KEY=$(echo "$CURRENT_DEVCONTAINER" | jq -r '((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:"))) // empty' | head -n 1)
@@ -180,13 +188,13 @@ jobs:
                 CURRENT_PRUVA_DIND_FEATURE_FILES=false
               fi
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ -z "$CURRENT_DOCKER_OUTSIDE_KEY" ] && [ "$CURRENT_DIND_FEATURE" = "$DIND_FEATURE_JSON" ] && [ "$CURRENT_PRUVA_DIND_FEATURE" = "{}" ] && [ "$CURRENT_FEATURE_ORDER_OK" = "true" ] && [ "$CURRENT_PRUVA_DIND_FEATURE_FILES" = "true" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_REPRO_CACHE_DIR" = "$REPRO_CACHE_DIR" ] && [ "$CURRENT_HAS_DOCKER_API_VERSION" = "false" ]; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ -z "$CURRENT_DOCKER_OUTSIDE_KEY" ] && [ "$CURRENT_DIND_FEATURE" = "$DIND_FEATURE_JSON" ] && [ "$CURRENT_PRUVA_DIND_FEATURE" = "{}" ] && [ "$CURRENT_FEATURE_ORDER_OK" = "true" ] && [ "$CURRENT_PRUVA_DIND_FEATURE_FILES" = "true" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_REPRO_CACHE_DIR" = "$REPRO_CACHE_DIR" ] && [ "$CURRENT_POST_CREATE" = "$POST_CREATE_COMMAND" ] && [ "$CURRENT_HAS_DOCKER_API_VERSION" = "false" ]; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
               fi
 
-              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, cache: ${CURRENT_REPRO_CACHE_DIR:-missing}, docker api pinned: ${CURRENT_HAS_DOCKER_API_VERSION:-unknown}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker outside: ${CURRENT_DOCKER_OUTSIDE_KEY:-absent}, dind feature: ${CURRENT_DIND_FEATURE:-missing}, pruva dind feature: ${CURRENT_PRUVA_DIND_FEATURE:-missing}, feature order ok: ${CURRENT_FEATURE_ORDER_OK:-unknown}, feature files: ${CURRENT_PRUVA_DIND_FEATURE_FILES:-unknown})"
+              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, cache: ${CURRENT_REPRO_CACHE_DIR:-missing}, postCreate canonical: $([ "$CURRENT_POST_CREATE" = "$POST_CREATE_COMMAND" ] && echo yes || echo no), docker api pinned: ${CURRENT_HAS_DOCKER_API_VERSION:-unknown}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker outside: ${CURRENT_DOCKER_OUTSIDE_KEY:-absent}, dind feature: ${CURRENT_DIND_FEATURE:-missing}, pruva dind feature: ${CURRENT_PRUVA_DIND_FEATURE:-missing}, feature order ok: ${CURRENT_FEATURE_ORDER_OK:-unknown}, feature files: ${CURRENT_PRUVA_DIND_FEATURE_FILES:-unknown})"
 
               # Checkout existing branch and fix it
               git fetch origin "$BRANCH:$BRANCH"
