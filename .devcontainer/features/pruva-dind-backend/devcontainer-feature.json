@@ -1,0 +1,9 @@
+{
+  "id": "pruva-dind-backend",
+  "version": "0.1.0",
+  "name": "Pruva Docker-in-Docker backend consistency",
+  "description": "Keeps the Codespaces Docker-in-Docker iptables backend consistent before dockerd starts.",
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/docker-in-docker"
+  ]
+}
