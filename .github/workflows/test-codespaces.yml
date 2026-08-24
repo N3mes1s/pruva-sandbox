@@ -196,7 +196,7 @@ jobs:
   #
   # This verifies the image can run pruva-verify directly. It is not the real
   # Codespaces path because GitHub Actions does not apply devcontainer features
-  # such as docker-outside-of-docker and sshd to this plain docker run.
+  # such as docker-in-docker and sshd to this plain docker run.
   test-in-container:
     runs-on: ubuntu-latest
     needs: discover

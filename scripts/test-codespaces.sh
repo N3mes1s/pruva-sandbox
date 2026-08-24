@@ -184,6 +184,12 @@ check_branch_patch_applies() {
   patch_file="${tmp_dir}/${repro_id}.patch"
 
   git show "${branch}:${patch_path}" >"$patch_file"
+  if grep -q 'DOCKER_API_VERSION' "$patch_file"; then
+    rm -rf "$tmp_dir"
+    fail "Public branch patch must not pin DOCKER_API_VERSION: ${patch_path}"
+    return 1
+  fi
+
   local -a patch_existing_targets=()
   while IFS= read -r target; do
     [[ -n "$target" ]] && patch_existing_targets+=("$target")
@@ -338,10 +344,11 @@ test_branch() {
 
   # Step 7: Check Codespaces image pinning. Reproduction metadata may describe
   # a different executor; patch portability is the production invariant here.
-  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image devcontainer_has_docker_api_version expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
+  devcontainer_has_docker_api_version=$(echo "$devcontainer" | jq -r '(.containerEnv // {}) | has("DOCKER_API_VERSION")')
   metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
   expected_image="$DEFAULT_SANDBOX_IMAGE"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
@@ -391,6 +398,13 @@ test_branch() {
     errors=$((errors + 1))
   else
     pass "PRUVA_SANDBOX_IMAGE matches devcontainer image"
+  fi
+
+  if [[ "$devcontainer_has_docker_api_version" != "false" ]]; then
+    fail "DOCKER_API_VERSION must not be pinned; Docker client/server negotiation must stay native"
+    errors=$((errors + 1))
+  else
+    pass "DOCKER_API_VERSION is not pinned"
   fi
 
   if [[ -n "$docker_outside_key" ]]; then
@@ -509,6 +523,33 @@ test_branch() {
   fi
 }
 
+check_no_patch_docker_api_pin() {
+  local patch_dir="${REPO_ROOT}/repro-patches"
+  local matches
+
+  if [[ ! -d "$patch_dir" ]]; then
+    return 0
+  fi
+
+  local patch
+  while IFS= read -r patch; do
+    if ! git apply --numstat -- "$patch" >/dev/null; then
+      fail "Malformed public repro patch: ${patch#"$REPO_ROOT/"}"
+      return 1
+    fi
+  done < <(find "$patch_dir" -name '*.patch' -type f | sort)
+  pass "Public repro patches parse with git apply --numstat"
+
+  matches=$(grep -R -n --include='*.patch' 'DOCKER_API_VERSION' "$patch_dir" 2>/dev/null || true)
+  if [[ -n "$matches" ]]; then
+    fail "Public repro patches must not pin DOCKER_API_VERSION; Docker negotiation must stay native"
+    echo "$matches" >&2
+    return 1
+  fi
+
+  pass "Public repro patches do not pin DOCKER_API_VERSION"
+}
+
 # Main
 echo ""
 echo -e "${BOLD}=========================================${NC}"
@@ -522,6 +563,10 @@ if [[ -z "$SINGLE_BRANCH" && "$TEST_ALL" != "true" ]]; then
   echo -e "  Latest source: ${LATEST_SOURCE}"
 fi
 echo ""
+
+if ! check_no_patch_docker_api_pin; then
+  exit 1
+fi
 
 # Collect branches to test
 declare -a BRANCHES=()
