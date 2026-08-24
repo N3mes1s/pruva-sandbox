@@ -33,7 +33,7 @@
   },
   "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
   "name": "Pruva Reproduction Environment",
-  "postCreateCommand": "[ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
+  "postCreateCommand": "trap '' TTIN TTOU; [ -n \"$REPRO_ID\" ] && pruva-verify \"$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'",
   "remoteUser": "vscode",
   "overrideFeatureInstallOrder": [
     "ghcr.io/devcontainers/features/docker-in-docker:4",
