@@ -344,7 +344,7 @@ test_branch() {
 
   # Step 7: Check Codespaces image pinning. Reproduction metadata may describe
   # a different executor; patch portability is the production invariant here.
-  local devcontainer_api_url devcontainer_image devcontainer_env_image devcontainer_has_docker_api_version expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode docker_dind_iptables_switch docker_dind_extra_keys sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image devcontainer_has_docker_api_version expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode docker_dind_iptables_switch docker_dind_extra_keys pruva_dind_feature_key pruva_dind_feature_json pruva_dind_install_path pruva_dind_manifest_path override_install_order_ok sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
@@ -363,6 +363,17 @@ test_branch() {
     docker_dind_iptables_switch=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" 'if .features[$key].iptablesSwitchAtRuntime == true then "true" elif .features[$key].iptablesSwitchAtRuntime == false then "false" else "unset" end')
   fi
   docker_dind_extra_keys=$(echo "$devcontainer" | jq -r --arg key "ghcr.io/devcontainers/features/docker-in-docker:4" '[((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:") and . != $key))] | join(",")')
+  pruva_dind_feature_key="./features/pruva-dind-backend"
+  pruva_dind_feature_json=$(echo "$devcontainer" | jq -Sc --arg key "$pruva_dind_feature_key" '.features[$key] // empty')
+  pruva_dind_manifest_path=".devcontainer/features/pruva-dind-backend/devcontainer-feature.json"
+  pruva_dind_install_path=".devcontainer/features/pruva-dind-backend/install.sh"
+  if echo "$devcontainer" | jq -e --arg dind "ghcr.io/devcontainers/features/docker-in-docker:4" --arg pruva "$pruva_dind_feature_key" --arg sshd "ghcr.io/devcontainers/features/sshd:1" '
+    (.overrideFeatureInstallOrder // []) == [$dind, $pruva, $sshd]
+  ' >/dev/null; then
+    override_install_order_ok=true
+  else
+    override_install_order_ok=false
+  fi
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
   if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
@@ -450,6 +461,37 @@ test_branch() {
     errors=$((errors + 1))
   else
     pass "docker-in-docker iptablesSwitchAtRuntime=true"
+  fi
+
+  if [[ "$pruva_dind_feature_json" != "{}" ]]; then
+    fail "Pruva DinD backend feature is required at ${pruva_dind_feature_key}; found '${pruva_dind_feature_json:-missing}'"
+    errors=$((errors + 1))
+  else
+    pass "Pruva DinD backend feature enabled"
+  fi
+
+  if [[ "$override_install_order_ok" != "true" ]]; then
+    fail "overrideFeatureInstallOrder must run Docker-in-Docker before ${pruva_dind_feature_key} and sshd"
+    errors=$((errors + 1))
+  else
+    pass "Feature install order is canonical"
+  fi
+
+  if ! git cat-file -e "${branch}:${pruva_dind_manifest_path}" 2>/dev/null; then
+    fail "Branch is missing local Pruva DinD backend feature manifest: ${pruva_dind_manifest_path}"
+    errors=$((errors + 1))
+  else
+    pass "Pruva DinD backend feature manifest exists"
+  fi
+
+  if ! git cat-file -e "${branch}:${pruva_dind_install_path}" 2>/dev/null; then
+    fail "Branch is missing local Pruva DinD backend feature installer: ${pruva_dind_install_path}"
+    errors=$((errors + 1))
+  elif ! git show "${branch}:${pruva_dind_install_path}" | grep -q 'PRUVA_DIND_BACKEND_MARKER'; then
+    fail "Pruva DinD backend feature installer is missing backend marker"
+    errors=$((errors + 1))
+  else
+    pass "Pruva DinD backend feature installer exists"
   fi
 
   if [[ "$sshd_version" != "latest" ]]; then

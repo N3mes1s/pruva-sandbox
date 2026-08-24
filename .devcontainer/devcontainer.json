@@ -9,10 +9,17 @@
       "installDockerBuildx": true,
       "iptablesSwitchAtRuntime": true
     },
+    "./features/pruva-dind-backend": {
+    },
     "ghcr.io/devcontainers/features/sshd:1": {
       "version": "latest"
     }
   },
+  "overrideFeatureInstallOrder": [
+    "ghcr.io/devcontainers/features/docker-in-docker:4",
+    "./features/pruva-dind-backend",
+    "ghcr.io/devcontainers/features/sshd:1"
+  ],
   "customizations": {
     "vscode": {
       "extensions": [
