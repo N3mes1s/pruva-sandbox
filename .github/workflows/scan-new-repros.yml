@@ -54,7 +54,7 @@ jobs:
           echo "Fetching reproductions from $API_URL..."
           echo "Default sandbox image: $DEFAULT_SANDBOX_IMAGE"
           REPRO_CACHE_DIR="/workspaces/pruva-sandbox/.pruva-repro-cache"
-          DIND_FEATURE_KEY="ghcr.io/devcontainers/features/docker-in-docker:2"
+          DIND_FEATURE_KEY="ghcr.io/devcontainers/features/docker-in-docker:4"
           DIND_FEATURE_JSON=$(jq -Sc --arg key "$DIND_FEATURE_KEY" '.features[$key] // empty' .devcontainer/devcontainer.json)
           if [ -z "$DIND_FEATURE_JSON" ]; then
             echo "Missing canonical $DIND_FEATURE_KEY feature in .devcontainer/devcontainer.json" >&2
@@ -75,7 +75,7 @@ jobs:
               --argjson dind_feature "$DIND_FEATURE_JSON" \
               '
                 .features //= {}
-                | .features |= with_entries(select(.key | startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:") | not))
+                | .features |= with_entries(select((.key | startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:") or startswith("ghcr.io/devcontainers/features/docker-in-docker:")) | not))
                 | .features[$dind_key] = $dind_feature
                 | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest"
                 | .containerEnv.REPRO_ID = $repro_id
@@ -89,7 +89,7 @@ jobs:
 
           regression_in=$(mktemp)
           regression_out=$(mktemp)
-          jq '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"] = {"moby": true, "dockerDashComposeVersion": "latest"} | del(.features["ghcr.io/devcontainers/features/docker-in-docker:2"]) | .containerEnv.DOCKER_API_VERSION = "1.43"' .devcontainer/devcontainer.json > "$regression_in"
+          jq '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"] = {"moby": true, "dockerDashComposeVersion": "latest"} | .features["ghcr.io/devcontainers/features/docker-in-docker:2"] = {"moby": false} | del(.features["ghcr.io/devcontainers/features/docker-in-docker:4"]) | .containerEnv.DOCKER_API_VERSION = "1.43"' .devcontainer/devcontainer.json > "$regression_in"
           write_devcontainer "$regression_in" "$regression_out" "REPRO-2026-00000" "$DEFAULT_SANDBOX_IMAGE"
           if jq -e '[((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:")))] | length > 0' "$regression_out" >/dev/null; then
             echo "Regression failed: devcontainer rewrite preserved docker-outside-of-docker" >&2
@@ -97,6 +97,10 @@ jobs:
           fi
           if ! jq -e --arg key "$DIND_FEATURE_KEY" --argjson feature "$DIND_FEATURE_JSON" '.features[$key] == $feature' "$regression_out" >/dev/null; then
             echo "Regression failed: devcontainer rewrite did not copy canonical Docker-in-Docker feature" >&2
+            exit 1
+          fi
+          if jq -e --arg key "$DIND_FEATURE_KEY" '[((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:") and . != $key))] | length > 0' "$regression_out" >/dev/null; then
+            echo "Regression failed: devcontainer rewrite preserved a non-canonical Docker-in-Docker feature" >&2
             exit 1
           fi
           if jq -e '.containerEnv | has("DOCKER_API_VERSION")' "$regression_out" >/dev/null; then

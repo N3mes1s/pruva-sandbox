@@ -344,7 +344,7 @@ test_branch() {
 
   # Step 7: Check Codespaces image pinning. Reproduction metadata may describe
   # a different executor; patch portability is the production invariant here.
-  local devcontainer_api_url devcontainer_image devcontainer_env_image devcontainer_has_docker_api_version expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image devcontainer_has_docker_api_version expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode docker_dind_iptables_switch docker_dind_extra_keys sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
@@ -356,10 +356,13 @@ test_branch() {
   docker_dind_key=$(echo "$devcontainer" | jq -r '((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:"))) // empty' | head -n 1)
   docker_dind_moby="unset"
   docker_dind_compose_mode="unset"
+  docker_dind_iptables_switch="unset"
   if [[ -n "$docker_dind_key" ]]; then
     docker_dind_moby=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" 'if .features[$key].moby == false then "false" elif .features[$key].moby == true then "true" else "unset" end')
     docker_dind_compose_mode=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" '.features[$key].dockerDashComposeVersion // "unset"')
+    docker_dind_iptables_switch=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" 'if .features[$key].iptablesSwitchAtRuntime == true then "true" elif .features[$key].iptablesSwitchAtRuntime == false then "false" else "unset" end')
   fi
+  docker_dind_extra_keys=$(echo "$devcontainer" | jq -r --arg key "ghcr.io/devcontainers/features/docker-in-docker:4" '[((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:") and . != $key))] | join(",")')
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
   if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
@@ -414,11 +417,18 @@ test_branch() {
     pass "docker-outside-of-docker feature absent"
   fi
 
-  if [[ -z "$docker_dind_key" ]]; then
-    fail "docker-in-docker feature is required for Codespaces workspace bind-mount parity"
+  if [[ "$docker_dind_key" != "ghcr.io/devcontainers/features/docker-in-docker:4" ]]; then
+    fail "docker-in-docker:4 feature is required for Codespaces workspace bind-mount and firewall parity; found '${docker_dind_key:-missing}'"
     errors=$((errors + 1))
   else
     pass "docker-in-docker feature enabled: ${docker_dind_key}"
+  fi
+
+  if [[ -n "$docker_dind_extra_keys" ]]; then
+    fail "non-canonical docker-in-docker feature key(s) present: ${docker_dind_extra_keys}"
+    errors=$((errors + 1))
+  else
+    pass "No non-canonical docker-in-docker feature keys"
   fi
 
   if [[ "$docker_dind_moby" != "false" ]]; then
@@ -433,6 +443,13 @@ test_branch() {
     errors=$((errors + 1))
   else
     pass "docker-in-docker docker-compose shim disabled"
+  fi
+
+  if [[ "$docker_dind_iptables_switch" != "true" ]]; then
+    fail "docker-in-docker:4 must set iptablesSwitchAtRuntime=true; found '${docker_dind_iptables_switch}'"
+    errors=$((errors + 1))
+  else
+    pass "docker-in-docker iptablesSwitchAtRuntime=true"
   fi
 
   if [[ "$sshd_version" != "latest" ]]; then

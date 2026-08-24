@@ -383,14 +383,58 @@ verify_remote_pruva_result() {
   return 1
 }
 
-check_docker_bind_mounts_in_codespace() {
+check_docker_runtime_contract_in_codespace() {
   local codespace="$1"
   local remote_script quoted_script
 
   remote_script='set -euo pipefail
+SUDO=""
+if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo"
+fi
+
+if [ -n "${DOCKER_API_VERSION:-}" ]; then
+  echo "ERROR: DOCKER_API_VERSION must not be pinned; found $DOCKER_API_VERSION" >&2
+  exit 2
+fi
+
+docker version --format "DOCKER_VERSION client={{.Client.Version}} server={{.Server.Version}} api={{.Server.APIVersion}}"
+docker info --format "DOCKER_INFO driver={{.Driver}} root={{.DockerRootDir}}"
+
+iptables_version="$($SUDO iptables -V 2>/dev/null || true)"
+case "$iptables_version" in
+  *nf_tables*) active_backend="nft"; inactive_cmd="iptables-legacy" ;;
+  *legacy*) active_backend="legacy"; inactive_cmd="iptables-nft" ;;
+  *)
+    echo "ERROR: cannot determine active iptables backend from: ${iptables_version:-missing}" >&2
+    exit 2
+    ;;
+esac
+echo "IPTABLES_ACTIVE_BACKEND=$active_backend"
+echo "IPTABLES_VERSION=$iptables_version"
+
+has_docker_rules() {
+  cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 && $SUDO "$cmd" -S 2>/dev/null | grep -Eq "DOCKER|docker"
+}
+
+forward_policy() {
+  cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 && $SUDO "$cmd" -S FORWARD 2>/dev/null | awk "/^-P FORWARD/ {print \$3; exit}"
+}
+
 base=/workspaces/pruva-sandbox/pruva-results/.docker-bind-regression
+docker rm -f pruva-net-server >/dev/null 2>&1 || true
+docker network rm pruva-net-probe >/dev/null 2>&1 || true
 rm -rf "$base"
 mkdir -p "$base/dir" "$base/writeback"
+cleanup() {
+  docker rm -f pruva-net-server >/dev/null 2>&1 || true
+  docker network rm pruva-net-probe >/dev/null 2>&1 || true
+  rm -rf "$base"
+}
+trap cleanup EXIT
+
 printf "pruva-file-bind\n" >"$base/file.txt"
 printf "pruva-dir-bind\n" >"$base/dir/nested.txt"
 
@@ -411,8 +455,40 @@ docker run --rm -v "$base/writeback:/probe/writeback" alpine:3.20 sh -ceu "
 test -f "$base/writeback/container-created.txt"
 grep -qx pruva-writeback "$base/writeback/container-created.txt"
 
-rm -rf "$base"
-echo "DIND_BIND_CONTRACT_OK"'
+docker network create pruva-net-probe >/dev/null
+docker run -d --name pruva-net-server --network pruva-net-probe alpine:3.20 sh -ceu '"'"'
+while true; do
+  { printf "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n"; } | nc -l -p 8080
+done
+'"'"' >/dev/null
+
+if ! has_docker_rules iptables; then
+  echo "ERROR: active iptables backend lacks Docker rules" >&2
+  $SUDO iptables -S >&2 || true
+  exit 2
+fi
+
+inactive_policy="$(forward_policy "$inactive_cmd" || true)"
+if [ "$inactive_policy" = "DROP" ] && ! has_docker_rules "$inactive_cmd"; then
+  echo "ERROR: inactive $inactive_cmd backend has stale FORWARD DROP without Docker rules" >&2
+  $SUDO "$inactive_cmd" -S FORWARD >&2 || true
+  exit 2
+fi
+
+docker run --rm --network pruva-net-probe alpine:3.20 sh -ceu '"'"'
+getent hosts pruva-net-server >/dev/null
+for i in $(seq 1 30); do
+  if printf "GET / HTTP/1.0\r\n\r\n" | nc -w 2 pruva-net-server 8080 | grep -q ok; then
+    exit 0
+  fi
+  sleep 1
+done
+exit 1
+'"'"'
+
+echo "DIND_IPTABLES_CONTRACT_OK"
+echo "DIND_BIND_CONTRACT_OK"
+echo "DIND_NET_CONTRACT_OK"'
   printf -v quoted_script "%q" "$remote_script"
   gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}"
 }
@@ -558,8 +634,8 @@ test_one_repro() {
         rm -f "$output_file"
         return 1
       fi
-      log "Checking Docker bind mounts in ${codespace_name}"
-      if ! check_docker_bind_mounts_in_codespace "$codespace_name"; then
+      log "Checking Docker runtime contract in ${codespace_name}"
+      if ! check_docker_runtime_contract_in_codespace "$codespace_name"; then
         gh codespace logs --codespace "$codespace_name" || true
         delete_codespace "$codespace_name"
         rm -f "$output_file"
