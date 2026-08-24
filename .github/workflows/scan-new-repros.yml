@@ -55,11 +55,29 @@ jobs:
           echo "Default sandbox image: $DEFAULT_SANDBOX_IMAGE"
           REPRO_CACHE_DIR="/workspaces/pruva-sandbox/.pruva-repro-cache"
           DIND_FEATURE_KEY="ghcr.io/devcontainers/features/docker-in-docker:4"
+          PRUVA_DIND_FEATURE_KEY="./features/pruva-dind-backend"
+          PRUVA_DIND_FEATURE_DIR=".devcontainer/features/pruva-dind-backend"
           DIND_FEATURE_JSON=$(jq -Sc --arg key "$DIND_FEATURE_KEY" '.features[$key] // empty' .devcontainer/devcontainer.json)
           if [ -z "$DIND_FEATURE_JSON" ]; then
             echo "Missing canonical $DIND_FEATURE_KEY feature in .devcontainer/devcontainer.json" >&2
             exit 1
           fi
+          if [ ! -s "$PRUVA_DIND_FEATURE_DIR/devcontainer-feature.json" ] || [ ! -s "$PRUVA_DIND_FEATURE_DIR/install.sh" ]; then
+            echo "Missing canonical Pruva DinD backend feature directory: $PRUVA_DIND_FEATURE_DIR" >&2
+            exit 1
+          fi
+          if ! grep -q 'PRUVA_DIND_BACKEND_MARKER' "$PRUVA_DIND_FEATURE_DIR/install.sh"; then
+            echo "Canonical Pruva DinD backend feature installer is missing backend marker" >&2
+            exit 1
+          fi
+          PRUVA_DIND_FEATURE_TMP=$(mktemp -d)
+          cp -R "$PRUVA_DIND_FEATURE_DIR" "$PRUVA_DIND_FEATURE_TMP/pruva-dind-backend"
+
+          sync_pruva_dind_feature() {
+            rm -rf "$PRUVA_DIND_FEATURE_DIR"
+            mkdir -p "$(dirname "$PRUVA_DIND_FEATURE_DIR")"
+            cp -R "$PRUVA_DIND_FEATURE_TMP/pruva-dind-backend" "$PRUVA_DIND_FEATURE_DIR"
+          }
 
           write_devcontainer() {
             input_file="$1"
@@ -72,12 +90,15 @@ jobs:
               --arg image "$image" \
               --arg cache_dir "$REPRO_CACHE_DIR" \
               --arg dind_key "$DIND_FEATURE_KEY" \
+              --arg pruva_dind_key "$PRUVA_DIND_FEATURE_KEY" \
               --argjson dind_feature "$DIND_FEATURE_JSON" \
               '
                 .features //= {}
-                | .features |= with_entries(select((.key | startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:") or startswith("ghcr.io/devcontainers/features/docker-in-docker:")) | not))
+                | .features |= with_entries(select((.key == $pruva_dind_key or (.key | startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:") or startswith("ghcr.io/devcontainers/features/docker-in-docker:"))) | not))
                 | .features[$dind_key] = $dind_feature
+                | .features[$pruva_dind_key] = {}
                 | .features["ghcr.io/devcontainers/features/sshd:1"].version = "latest"
+                | .overrideFeatureInstallOrder = [$dind_key, $pruva_dind_key, "ghcr.io/devcontainers/features/sshd:1"]
                 | .containerEnv.REPRO_ID = $repro_id
                 | .containerEnv.PRUVA_API_URL = $api_url
                 | .containerEnv.PRUVA_SANDBOX_IMAGE = $image
@@ -99,8 +120,16 @@ jobs:
             echo "Regression failed: devcontainer rewrite did not copy canonical Docker-in-Docker feature" >&2
             exit 1
           fi
+          if ! jq -e --arg key "$PRUVA_DIND_FEATURE_KEY" '.features[$key] == {}' "$regression_out" >/dev/null; then
+            echo "Regression failed: devcontainer rewrite did not require the Pruva DinD backend feature" >&2
+            exit 1
+          fi
           if jq -e --arg key "$DIND_FEATURE_KEY" '[((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:") and . != $key))] | length > 0' "$regression_out" >/dev/null; then
             echo "Regression failed: devcontainer rewrite preserved a non-canonical Docker-in-Docker feature" >&2
+            exit 1
+          fi
+          if ! jq -e --arg dind "$DIND_FEATURE_KEY" --arg pruva "$PRUVA_DIND_FEATURE_KEY" --arg sshd "ghcr.io/devcontainers/features/sshd:1" '.overrideFeatureInstallOrder == [$dind, $pruva, $sshd]' "$regression_out" >/dev/null; then
+            echo "Regression failed: devcontainer rewrite did not set canonical feature install order" >&2
             exit 1
           fi
           if jq -e '.containerEnv | has("DOCKER_API_VERSION")' "$regression_out" >/dev/null; then
@@ -143,14 +172,21 @@ jobs:
               CURRENT_SSHD_VERSION=$(echo "$CURRENT_DEVCONTAINER" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
               CURRENT_DOCKER_OUTSIDE_KEY=$(echo "$CURRENT_DEVCONTAINER" | jq -r '((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:"))) // empty' | head -n 1)
               CURRENT_DIND_FEATURE=$(echo "$CURRENT_DEVCONTAINER" | jq -Sc --arg key "$DIND_FEATURE_KEY" '.features[$key] // empty')
+              CURRENT_PRUVA_DIND_FEATURE=$(echo "$CURRENT_DEVCONTAINER" | jq -Sc --arg key "$PRUVA_DIND_FEATURE_KEY" '.features[$key] // empty')
+              CURRENT_FEATURE_ORDER_OK=$(echo "$CURRENT_DEVCONTAINER" | jq -r --arg dind "$DIND_FEATURE_KEY" --arg pruva "$PRUVA_DIND_FEATURE_KEY" --arg sshd "ghcr.io/devcontainers/features/sshd:1" '(.overrideFeatureInstallOrder // []) == [$dind, $pruva, $sshd]')
+              if curl -sf "https://raw.githubusercontent.com/N3mes1s/pruva-sandbox/$BRANCH/$PRUVA_DIND_FEATURE_DIR/install.sh" | grep -q 'PRUVA_DIND_BACKEND_MARKER'; then
+                CURRENT_PRUVA_DIND_FEATURE_FILES=true
+              else
+                CURRENT_PRUVA_DIND_FEATURE_FILES=false
+              fi
 
-              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ -z "$CURRENT_DOCKER_OUTSIDE_KEY" ] && [ "$CURRENT_DIND_FEATURE" = "$DIND_FEATURE_JSON" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_REPRO_CACHE_DIR" = "$REPRO_CACHE_DIR" ] && [ "$CURRENT_HAS_DOCKER_API_VERSION" = "false" ]; then
+              if [ "$CURRENT_ID" = "$REPRO_ID" ] && [ "$CURRENT_API_URL" = "$API_URL" ] && [ "$CURRENT_SSHD_VERSION" = "latest" ] && [ -z "$CURRENT_DOCKER_OUTSIDE_KEY" ] && [ "$CURRENT_DIND_FEATURE" = "$DIND_FEATURE_JSON" ] && [ "$CURRENT_PRUVA_DIND_FEATURE" = "{}" ] && [ "$CURRENT_FEATURE_ORDER_OK" = "true" ] && [ "$CURRENT_PRUVA_DIND_FEATURE_FILES" = "true" ] && [ "$CURRENT_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_ENV_IMAGE" = "$EXPECTED_IMAGE" ] && [ "$CURRENT_REPRO_CACHE_DIR" = "$REPRO_CACHE_DIR" ] && [ "$CURRENT_HAS_DOCKER_API_VERSION" = "false" ]; then
                 echo "SKIP: $BRANCH already configured correctly"
                 SKIPPED=$((SKIPPED + 1))
                 continue
               fi
 
-              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, cache: ${CURRENT_REPRO_CACHE_DIR:-missing}, docker api pinned: ${CURRENT_HAS_DOCKER_API_VERSION:-unknown}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker outside: ${CURRENT_DOCKER_OUTSIDE_KEY:-absent}, dind feature: ${CURRENT_DIND_FEATURE:-missing})"
+              echo "FIX: $BRANCH (current id: ${CURRENT_ID:-empty}, expected id: $REPRO_ID, current api: ${CURRENT_API_URL:-empty}, expected api: $API_URL, current image: ${CURRENT_IMAGE:-empty}, current env image: ${CURRENT_ENV_IMAGE:-empty}, expected image: ${EXPECTED_IMAGE:-none}, cache: ${CURRENT_REPRO_CACHE_DIR:-missing}, docker api pinned: ${CURRENT_HAS_DOCKER_API_VERSION:-unknown}, sshd: ${CURRENT_SSHD_VERSION:-missing}, docker outside: ${CURRENT_DOCKER_OUTSIDE_KEY:-absent}, dind feature: ${CURRENT_DIND_FEATURE:-missing}, pruva dind feature: ${CURRENT_PRUVA_DIND_FEATURE:-missing}, feature order ok: ${CURRENT_FEATURE_ORDER_OK:-unknown}, feature files: ${CURRENT_PRUVA_DIND_FEATURE_FILES:-unknown})"
 
               # Checkout existing branch and fix it
               git fetch origin "$BRANCH:$BRANCH"
@@ -160,9 +196,10 @@ jobs:
               tmp_devcontainer=$(mktemp)
               write_devcontainer .devcontainer/devcontainer.json "$tmp_devcontainer" "$REPRO_ID" "$EXPECTED_IMAGE"
               mv "$tmp_devcontainer" .devcontainer/devcontainer.json
+              sync_pruva_dind_feature
 
               # Commit and force-push fix
-              git add .devcontainer/devcontainer.json
+              git add .devcontainer/devcontainer.json "$PRUVA_DIND_FEATURE_DIR"
               git commit -m "fix: configure Codespace for $REPRO_ID" \
                 -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
               git push --force-with-lease origin "$BRANCH"
@@ -184,9 +221,10 @@ jobs:
             tmp_devcontainer=$(mktemp)
             write_devcontainer .devcontainer/devcontainer.json "$tmp_devcontainer" "$REPRO_ID" "$EXPECTED_IMAGE"
             mv "$tmp_devcontainer" .devcontainer/devcontainer.json
+            sync_pruva_dind_feature
 
             # Commit changes
-            git add .devcontainer/devcontainer.json
+            git add .devcontainer/devcontainer.json "$PRUVA_DIND_FEATURE_DIR"
             git commit -m "chore: configure Codespace for $REPRO_ID" \
               -m "Co-Authored-By: GitHub Actions <github-actions[bot]@users.noreply.github.com>"
 

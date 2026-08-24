@@ -418,12 +418,19 @@ has_docker_rules() {
   command -v "$cmd" >/dev/null 2>&1 && $SUDO "$cmd" -S 2>/dev/null | grep -Eq "DOCKER|docker"
 }
 
+rules_for_bridge() {
+  cmd="$1"
+  bridge="$2"
+  command -v "$cmd" >/dev/null 2>&1 && $SUDO "$cmd" -S 2>/dev/null | grep -Fq "$bridge"
+}
+
 forward_policy() {
   cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 && $SUDO "$cmd" -S FORWARD 2>/dev/null | awk "/^-P FORWARD/ {print \$3; exit}"
 }
 
 base=/workspaces/pruva-sandbox/pruva-results/.docker-bind-regression
+probe_image="${PRUVA_DIND_PROBE_IMAGE:-python:3.13-alpine}"
 docker rm -f pruva-net-server >/dev/null 2>&1 || true
 docker network rm pruva-net-probe >/dev/null 2>&1 || true
 rm -rf "$base"
@@ -455,12 +462,34 @@ docker run --rm -v "$base/writeback:/probe/writeback" alpine:3.20 sh -ceu "
 test -f "$base/writeback/container-created.txt"
 grep -qx pruva-writeback "$base/writeback/container-created.txt"
 
+cat >"$base/server.py" <<\PY
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *_args):
+        return
+
+
+HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+PY
+
 docker network create pruva-net-probe >/dev/null
-docker run -d --name pruva-net-server --network pruva-net-probe alpine:3.20 sh -ceu '"'"'
-while true; do
-  { printf "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n"; } | nc -l -p 8080
-done
-'"'"' >/dev/null
+bridge_name="$(docker network inspect pruva-net-probe -f "{{ index .Options \"com.docker.network.bridge.name\" }}" 2>/dev/null || true)"
+if [ -z "$bridge_name" ] || [ "$bridge_name" = "<no value>" ]; then
+  bridge_id="$(docker network inspect pruva-net-probe -f "{{ .Id }}" | cut -c1-12)"
+  bridge_name="br-$bridge_id"
+fi
+echo "DIND_PROBE_BRIDGE=$bridge_name"
+
+docker run -d --name pruva-net-server --network pruva-net-probe -v "$base/server.py:/server.py:ro" "$probe_image" python /server.py >/dev/null
 
 if ! has_docker_rules iptables; then
   echo "ERROR: active iptables backend lacks Docker rules" >&2
@@ -468,23 +497,40 @@ if ! has_docker_rules iptables; then
   exit 2
 fi
 
+if ! rules_for_bridge iptables "$bridge_name"; then
+  echo "ERROR: active iptables backend lacks rules for probe bridge $bridge_name" >&2
+  $SUDO iptables -S >&2 || true
+  exit 2
+fi
+
 inactive_policy="$(forward_policy "$inactive_cmd" || true)"
-if [ "$inactive_policy" = "DROP" ] && ! has_docker_rules "$inactive_cmd"; then
-  echo "ERROR: inactive $inactive_cmd backend has stale FORWARD DROP without Docker rules" >&2
+if [ "$inactive_policy" = "DROP" ] && ! rules_for_bridge "$inactive_cmd" "$bridge_name"; then
+  echo "ERROR: inactive $inactive_cmd backend has stale FORWARD DROP without rules for probe bridge $bridge_name" >&2
   $SUDO "$inactive_cmd" -S FORWARD >&2 || true
   exit 2
 fi
 
-docker run --rm --network pruva-net-probe alpine:3.20 sh -ceu '"'"'
-getent hosts pruva-net-server >/dev/null
+net_ok=false
 for i in $(seq 1 30); do
-  if printf "GET / HTTP/1.0\r\n\r\n" | nc -w 2 pruva-net-server 8080 | grep -q ok; then
-    exit 0
+  if docker run -i --rm --network pruva-net-probe "$probe_image" python - <<\PY
+import socket
+import urllib.request
+
+socket.gethostbyname("pruva-net-server")
+body = urllib.request.urlopen("http://pruva-net-server:8080/", timeout=3).read().decode()
+if body != "ok":
+    raise SystemExit(f"unexpected body: {body!r}")
+PY
+  then
+    net_ok=true
+    break
   fi
   sleep 1
 done
-exit 1
-'"'"'
+if [ "$net_ok" != "true" ]; then
+  echo "ERROR: container-to-container DNS/TCP probe failed" >&2
+  exit 1
+fi
 
 echo "DIND_IPTABLES_CONTRACT_OK"
 echo "DIND_BIND_CONTRACT_OK"
