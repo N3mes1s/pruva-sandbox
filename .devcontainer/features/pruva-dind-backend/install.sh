@@ -27,22 +27,28 @@ if start < 0 or end < 0:
 replacement = f"""# {marker}: Codespaces can retain a legacy FORWARD DROP table even when
 # the default alternative points at nft. Probe legacy first so dockerd writes
 # rules to the backend that will actually see bridged container traffic.
+pruva_dind_sudo=
+if [ "$(id -u)" -ne 0 ] && type sudo > /dev/null 2>&1; then
+    pruva_dind_sudo=sudo
+fi
+
 if type iptables-legacy > /dev/null 2>&1 \\
    && update-alternatives --list iptables 2>/dev/null | grep -q '/usr/sbin/iptables-legacy'; then
-    iptables-legacy -S >/dev/null 2>&1 || true
+    $pruva_dind_sudo iptables-legacy -S >/dev/null 2>&1 || true
 fi
 
 if type iptables-legacy > /dev/null 2>&1 \\
    && {{ grep -qE '^(ip_tables)\\b' /proc/modules \\
         || [ -d /sys/module/ip_tables ]; }} \\
    && update-alternatives --list iptables 2>/dev/null | grep -q '/usr/sbin/iptables-legacy'; then
-    update-alternatives --set iptables  /usr/sbin/iptables-legacy || true
-    update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+    $pruva_dind_sudo update-alternatives --set iptables  /usr/sbin/iptables-legacy || true
+    $pruva_dind_sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
 elif type iptables-nft > /dev/null 2>&1 \\
      && update-alternatives --list iptables 2>/dev/null | grep -q '/usr/sbin/iptables-nft'; then
-    update-alternatives --set iptables  /usr/sbin/iptables-nft  || true
-    update-alternatives --set ip6tables /usr/sbin/ip6tables-nft || true
+    $pruva_dind_sudo update-alternatives --set iptables  /usr/sbin/iptables-nft  || true
+    $pruva_dind_sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft || true
 fi
+unset pruva_dind_sudo
 """
 
 path.write_text(text[:start] + replacement + text[end:])
