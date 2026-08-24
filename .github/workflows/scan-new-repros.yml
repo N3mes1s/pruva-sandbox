@@ -57,7 +57,7 @@ jobs:
           DIND_FEATURE_KEY="ghcr.io/devcontainers/features/docker-in-docker:4"
           PRUVA_DIND_FEATURE_KEY="./features/pruva-dind-backend"
           PRUVA_DIND_FEATURE_DIR=".devcontainer/features/pruva-dind-backend"
-          POST_CREATE_COMMAND="trap '' TTIN TTOU; [ -n \"\$REPRO_ID\" ] && pruva-verify \"\$REPRO_ID\" || echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'"
+          POST_CREATE_COMMAND="trap '' TTIN TTOU; if [ -n \"\$REPRO_ID\" ]; then setsid -w pruva-verify \"\$REPRO_ID\" </dev/null; else echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'; fi"
           DIND_FEATURE_JSON=$(jq -Sc --arg key "$DIND_FEATURE_KEY" '.features[$key] // empty' .devcontainer/devcontainer.json)
           if [ -z "$DIND_FEATURE_JSON" ]; then
             echo "Missing canonical $DIND_FEATURE_KEY feature in .devcontainer/devcontainer.json" >&2

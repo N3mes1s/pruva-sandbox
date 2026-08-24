@@ -323,11 +323,11 @@ test_branch() {
   elif [[ "$post_create" != *"pruva-verify"* ]]; then
     warn "postCreateCommand does not reference pruva-verify"
     warnings=$((warnings + 1))
-  elif [[ "$post_create" != *"trap '' TTIN TTOU"* ]]; then
-    fail "postCreateCommand must ignore TTIN/TTOU before pruva-verify to prevent Codespaces timeout/xvfb-run terminal stops"
+  elif [[ "$post_create" != *"setsid -w pruva-verify"* || "$post_create" != *"</dev/null"* ]]; then
+    fail "postCreateCommand must run pruva-verify through setsid -w with stdin from /dev/null to prevent Codespaces timeout/xvfb-run terminal stops"
     errors=$((errors + 1))
   else
-    pass "postCreateCommand invokes pruva-verify with terminal-stop guard"
+    pass "postCreateCommand invokes pruva-verify with terminal-detached guard"
   fi
 
   # Step 6: Fetch metadata from Pruva API
