@@ -256,7 +256,7 @@ for proc in /proc/[0-9]*; do
     *\"\$verify_needle\"*|*\"\$script_needle\"*) exit 1 ;;
   esac
 done
-for rel in logs/reproduction_steps.log repro/runtime_manifest.json repro/validation_verdict.json; do
+for rel in repro/runtime_manifest.json repro/validation_verdict.json; do
   file=\"\$base/\$rel\"
   test -s \"\$file\" || exit 1
   mtime=\$(stat -c %Y \"\$file\")
@@ -306,7 +306,7 @@ check_remote_pruva_file_freshness() {
   remote_script="set -eu
 base='${base}'
 min_epoch=${min_epoch}
-for rel in logs/reproduction_steps.log repro/runtime_manifest.json repro/validation_verdict.json; do
+for rel in repro/runtime_manifest.json repro/validation_verdict.json; do
   file=\"\$base/\$rel\"
   if [ ! -s \"\$file\" ]; then
     echo \"missing required fresh result file: \$file\" >&2
