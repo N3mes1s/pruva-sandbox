@@ -338,15 +338,21 @@ test_branch() {
 
   # Step 7: Check Codespaces image pinning. Reproduction metadata may describe
   # a different executor; patch portability is the production invariant here.
-  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_moby docker_compose_mode sshd_version
+  local devcontainer_api_url devcontainer_image devcontainer_env_image expected_image metadata_image sandbox_version docker_outside_key docker_dind_key docker_dind_moby docker_dind_compose_mode sshd_version
   devcontainer_api_url=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_API_URL // empty')
   devcontainer_image=$(echo "$devcontainer" | jq -r '.image // empty')
   devcontainer_env_image=$(echo "$devcontainer" | jq -r '.containerEnv.PRUVA_SANDBOX_IMAGE // empty')
   metadata_image=$(echo "$metadata" | jq -r '.environment.sandbox_image // empty')
   expected_image="$DEFAULT_SANDBOX_IMAGE"
   sandbox_version=$(echo "$metadata" | jq -r '.environment.sandbox_version // empty')
-  docker_moby=$(echo "$devcontainer" | jq -r 'if .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == false then "false" elif .features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].moby == true then "true" else "unset" end')
-  docker_compose_mode=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/docker-outside-of-docker:1"].dockerDashComposeVersion // "unset"')
+  docker_outside_key=$(echo "$devcontainer" | jq -r '((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-outside-of-docker:"))) // empty' | head -n 1)
+  docker_dind_key=$(echo "$devcontainer" | jq -r '((.features // {}) | keys[]? | select(startswith("ghcr.io/devcontainers/features/docker-in-docker:"))) // empty' | head -n 1)
+  docker_dind_moby="unset"
+  docker_dind_compose_mode="unset"
+  if [[ -n "$docker_dind_key" ]]; then
+    docker_dind_moby=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" 'if .features[$key].moby == false then "false" elif .features[$key].moby == true then "true" else "unset" end')
+    docker_dind_compose_mode=$(echo "$devcontainer" | jq -r --arg key "$docker_dind_key" '.features[$key].dockerDashComposeVersion // "unset"')
+  fi
   sshd_version=$(echo "$devcontainer" | jq -r '.features["ghcr.io/devcontainers/features/sshd:1"].version // empty')
 
   if [[ "$devcontainer_api_url" != "$API_URL" ]]; then
@@ -387,18 +393,32 @@ test_branch() {
     pass "PRUVA_SANDBOX_IMAGE matches devcontainer image"
   fi
 
-  if [[ "$docker_moby" != "false" ]]; then
-    fail "docker-outside-of-docker feature must set moby=false for Codespaces compatibility; found '${docker_moby}'"
+  if [[ -n "$docker_outside_key" ]]; then
+    fail "docker-outside-of-docker is not valid for arbitrary Codespaces workspace bind mounts; found '${docker_outside_key}'"
     errors=$((errors + 1))
   else
-    pass "docker-outside-of-docker moby=false"
+    pass "docker-outside-of-docker feature absent"
   fi
 
-  if [[ "$docker_compose_mode" != "none" ]]; then
-    fail "docker-outside-of-docker must not install the docker-compose shim; found dockerDashComposeVersion='${docker_compose_mode}'"
+  if [[ -z "$docker_dind_key" ]]; then
+    fail "docker-in-docker feature is required for Codespaces workspace bind-mount parity"
     errors=$((errors + 1))
   else
-    pass "docker-outside-of-docker docker-compose shim disabled"
+    pass "docker-in-docker feature enabled: ${docker_dind_key}"
+  fi
+
+  if [[ "$docker_dind_moby" != "false" ]]; then
+    fail "docker-in-docker feature must set moby=false; found '${docker_dind_moby}'"
+    errors=$((errors + 1))
+  else
+    pass "docker-in-docker moby=false"
+  fi
+
+  if [[ "$docker_dind_compose_mode" != "none" ]]; then
+    fail "docker-in-docker must not install the docker-compose shim; found dockerDashComposeVersion='${docker_dind_compose_mode}'"
+    errors=$((errors + 1))
+  else
+    pass "docker-in-docker docker-compose shim disabled"
   fi
 
   if [[ "$sshd_version" != "latest" ]]; then

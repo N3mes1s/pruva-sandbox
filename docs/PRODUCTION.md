@@ -214,10 +214,11 @@ parity and fast sandbox smoke tests, but it does not replace a real Codespaces
 startup check because Codespaces applies devcontainer features, branch-specific
 `REPRO_ID`, and the exact web UI creation path.
 
-The Codespaces devcontainer must keep the Docker CLI available through
-Docker-outside-of-Docker while disabling the legacy `docker-compose` shim. Repro
-scripts should use `docker compose`, which is provided by the Docker CLI plugin
-without a separate mutable GitHub-release download during startup.
+The Codespaces devcontainer must use Docker-in-Docker, not
+Docker-outside-of-Docker, so nested containers can bind-mount the same
+`/workspaces` paths that repro scripts see. The legacy `docker-compose` shim
+must stay disabled; repro scripts should use `docker compose` through the Docker
+CLI plugin.
 
 After changing the devcontainer contract, run `[Internal] Scan for New
 Reproductions` so existing `repro/*` branches receive the same configuration.

@@ -163,7 +163,7 @@ The test suite covers input validation, artifact path normalization, script sele
 ./scripts/test-codespaces-bulk-gh.sh --latest 5 --per-repro-timeout 45m
 
 # Optional raw-container smoke test in CI. This does not apply devcontainer
-# features such as docker-outside-of-docker or sshd.
+# features such as docker-in-docker or sshd.
 gh workflow run test-codespaces.yml -f latest_count=20 -f container_smoke=true
 
 # Real Codespaces test in CI. Configure a CODESPACES_PAT repository secret with
@@ -173,10 +173,9 @@ gh workflow run test-codespaces.yml \
   -f codespaces_mode=verify \
   -f codespaces_max_parallel=3
 
-# The devcontainer uses Docker outside of Docker for the host socket and installs
-# Compose v2 through the Docker CLI plugin only. The legacy docker-compose shim
-# is disabled to avoid an extra mutable GitHub-release download during Codespaces
-# startup.
+# The devcontainer uses Docker-in-Docker so nested Docker bind mounts see the
+# same /workspaces tree as the Codespace. The legacy docker-compose shim is
+# disabled to avoid an extra mutable GitHub-release download during startup.
 
 # Full E2E test via Modal (requires MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)
 uv run python scripts/test_codespaces_modal.py --latest 5
@@ -242,9 +241,9 @@ git push origin v0.1.0
 
 This cross-compiles binaries for `x86_64` and `aarch64` Linux and uploads them to the GitHub Release. The devcontainer image builds `pruva-verify` from the same checked-out source commit, so Codespaces does not depend on a separate release being published first.
 
-## Docker-in-Docker for Special Cases
+## Docker in Reproductions
 
-Some reproductions require specific OS versions, library versions, or network isolation. For these, use Docker-in-Docker:
+Codespaces runs Docker-in-Docker so reproductions can bind-mount files and directories from `/workspaces/pruva-sandbox/pruva-results` into nested containers without host path rewriting. To run the same sandbox image directly:
 
 ```bash
 SANDBOX_IMAGE="${PRUVA_SANDBOX_IMAGE:-$(jq -r '.image' .devcontainer/devcontainer.json)}"
@@ -256,7 +255,7 @@ docker run --rm \
   pruva-verify REPRO-2026-00006
 ```
 
-**When to use Docker-in-Docker:**
+**Typical nested-Docker use cases:**
 - Kernel vulnerabilities requiring specific kernel versions
 - Library vulnerabilities requiring exact vulnerable versions
 - Network isolation for simulating attack scenarios

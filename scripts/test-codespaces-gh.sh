@@ -221,12 +221,24 @@ wait_for_codespace_ssh() {
   return 1
 }
 
-remote_pruva_verdict_exists() {
+remote_pruva_run_finished() {
   local codespace="$1"
   local repro_id="$2"
   local remote_script quoted_script
 
-  remote_script="test -f /workspaces/pruva-sandbox/pruva-results/${repro_id}/repro/validation_verdict.json"
+  remote_script="set -eu
+base=/workspaces/pruva-sandbox/pruva-results/${repro_id}
+test -d \"\$base\" || exit 1
+self=\$\$
+for proc in /proc/[0-9]*; do
+  pid=\${proc##*/}
+  [ \"\$pid\" = \"\$self\" ] && continue
+  cmd=\$(tr '\\0' ' ' <\"\$proc/cmdline\" 2>/dev/null || true)
+  case \"\$cmd\" in
+    *\"pruva-verify ${repro_id}\"*|*\"reproduction_steps.sh\"*) exit 1 ;;
+  esac
+done
+test -f \"\$base/logs/reproduction_steps.log\" || test -f \"\$base/repro/runtime_manifest.json\" || test -f \"\$base/repro/validation_verdict.json\""
   printf -v quoted_script "%q" "$remote_script"
   gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}" >/dev/null 2>&1
 }
@@ -245,9 +257,9 @@ wait_for_codespace_post_create() {
         return 0
       fi
     fi
-    if remote_pruva_verdict_exists "$codespace" "$repro_id"; then
+    if remote_pruva_run_finished "$codespace" "$repro_id"; then
       rm -f "$logs"
-      log "Detected Pruva validation verdict for ${repro_id}"
+      log "Detected completed Pruva run for ${repro_id}"
       return 0
     fi
     log "Waiting for postCreateCommand in ${codespace}"
@@ -278,10 +290,24 @@ verify_remote_pruva_result() {
   cat "$verdict_file"
   echo
 
+  local manifest_present=false
   if gh codespace ssh --codespace "$codespace" -- "cat ${base}/repro/runtime_manifest.json" >"$manifest_file" 2>/dev/null; then
+    manifest_present=true
     echo "== runtime_manifest =="
     cat "$manifest_file"
     echo
+  fi
+
+  if [[ "$manifest_present" == "true" ]] && jq -e '
+    (.target_path_reached? == false)
+    or (.attempt_results?.overall? == "failed")
+    or (.overall? == "failed")
+    or (.repro_result? == "failed")
+  ' "$manifest_file" >/dev/null; then
+    fail "runtime_manifest indicates failed runtime for ${repro_id}"
+    rm -f "$verdict_file" "$manifest_file"
+    gh codespace ssh --codespace "$codespace" -- "if [ -d ${base}/logs ]; then echo '== logs tail ==' >&2; find ${base}/logs -maxdepth 2 -type f | sort | while read -r log_file; do echo \"---- \$log_file ----\" >&2; tail -n 40 \"\$log_file\" >&2 || true; done; fi" || true
+    return 1
   fi
 
   if jq -e '.repro_result == "confirmed" and .end_to_end_target_reached == true' "$verdict_file" >/dev/null; then
@@ -292,6 +318,34 @@ verify_remote_pruva_result() {
   rm -f "$verdict_file" "$manifest_file"
   gh codespace ssh --codespace "$codespace" -- "if [ -d ${base}/logs ]; then echo '== logs tail ==' >&2; for log_file in ${base}/logs/*; do [ -f \"\$log_file\" ] || continue; echo \"---- \$log_file ----\" >&2; tail -n 40 \"\$log_file\" >&2 || true; done; fi" || true
   return 1
+}
+
+check_docker_bind_mounts_in_codespace() {
+  local codespace="$1"
+  local remote_script quoted_script
+
+  remote_script='set -euo pipefail
+base=/workspaces/pruva-sandbox/pruva-results/.docker-bind-regression
+rm -rf "$base"
+mkdir -p "$base/dir"
+printf "pruva-file-bind\n" >"$base/file.txt"
+printf "pruva-dir-bind\n" >"$base/dir/nested.txt"
+
+docker run --rm -v "$base/file.txt:/probe/file.txt:ro" alpine:3.20 sh -ceu "
+  test -f /probe/file.txt
+  grep -qx pruva-file-bind /probe/file.txt
+"
+
+docker run --rm -v "$base/dir:/probe/dir:ro" alpine:3.20 sh -ceu "
+  test -d /probe/dir
+  test -f /probe/dir/nested.txt
+  grep -qx pruva-dir-bind /probe/dir/nested.txt
+"
+
+rm -rf "$base"
+echo "Docker bind mounts preserve pruva-results files and directories"'
+  printf -v quoted_script "%q" "$remote_script"
+  gh codespace ssh --codespace "$codespace" "bash -lc ${quoted_script}"
 }
 
 check_environment_in_codespace() {
@@ -305,6 +359,7 @@ if [ \"\${CODESPACES_RECOVERY_CONTAINER:-}\" = \"true\" ]; then
 fi
 test -f /etc/pruva-sandbox-version
 command -v pruva-verify >/dev/null
+command -v docker >/dev/null
 echo '== sandbox =='
 cat /etc/pruva-sandbox-version"
   printf -v quoted_script "%q" "$remote_script"
@@ -333,7 +388,8 @@ verify_post_create_result() {
 
   if grep -q "VERIFICATION SUCCESSFUL" "$logs"; then
     rm -f "$logs"
-    return 0
+    verify_remote_pruva_result "$codespace" "$repro_id"
+    return
   fi
 
   if grep -q "VERIFICATION FAILED" "$logs"; then
@@ -417,6 +473,13 @@ test_one_repro() {
       fi
       log "Checking Pruva environment in ${codespace_name}"
       if ! check_environment_in_codespace "$codespace_name"; then
+        gh codespace logs --codespace "$codespace_name" || true
+        delete_codespace "$codespace_name"
+        rm -f "$output_file"
+        return 1
+      fi
+      log "Checking Docker bind mounts in ${codespace_name}"
+      if ! check_docker_bind_mounts_in_codespace "$codespace_name"; then
         gh codespace logs --codespace "$codespace_name" || true
         delete_codespace "$codespace_name"
         rm -f "$output_file"
