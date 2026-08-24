@@ -1,11 +1,9 @@
 --- repro/reproduction_steps.sh
 +++ repro/reproduction_steps.sh
-@@ -8,20 +8,25 @@
+@@ -8,20 +8,23 @@
 
  cd "$ROOT"
 
-+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.43}"
-+
  # Configuration
  VULN_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.10"
  FIXED_IMAGE="registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.21"
@@ -27,7 +25,7 @@
 
  # Write MySQL init
  if [ ! -f "$DATA_DIR/bin/mysql/init.sql" ]; then
-@@ -102,11 +107,11 @@
+@@ -102,11 +105,11 @@
 
  wait_for_app() {
    local url=$1
@@ -41,7 +39,7 @@
      if [ "$code" = "401" ] || [ "$code" = "200" ]; then
        echo " OK (${code})"
        return 0
-@@ -115,6 +120,8 @@
+@@ -115,6 +118,8 @@
      echo -n "."
    done
    echo " TIMEOUT"
@@ -50,7 +48,7 @@
    return 1
  }
 
-@@ -125,10 +132,11 @@
+@@ -125,10 +130,11 @@
 
    docker run -d --name mysql-de --network dataease-network \
      -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -66,7 +64,7 @@
 
    echo -n "[+] Waiting for MySQL"
    for i in $(seq 1 60); do
-@@ -154,16 +162,9 @@
+@@ -154,16 +160,9 @@
 
    # Start DataEase
    docker run -d --name dataease --network dataease-network -p "$DE_PORT:$DE_PORT" \
@@ -86,7 +84,7 @@
      -e DE_MYSQL_HOST=mysql-de \
      -e DE_MYSQL_PORT=3306 \
      -e DE_MYSQL_DB=dataease \
-@@ -172,8 +173,8 @@
+@@ -172,8 +171,8 @@
      -e DE_INSTALL_MODE=community \
      "$image" >/dev/null
 
