@@ -19,6 +19,7 @@ IDLE_TIMEOUT="10m"
 RETENTION_PERIOD="1h"
 CREATE_TIMEOUT="45m"
 SSH_TIMEOUT="10m"
+POST_CREATE_TIMEOUT="30m"
 MACHINE=""
 LOCATION=""
 MODE="available"
@@ -49,6 +50,9 @@ OPTIONS:
     --retention VALUE      Codespace retention period (default: ${RETENTION_PERIOD})
     --create-timeout VALUE Max time for Codespace creation (default: ${CREATE_TIMEOUT})
     --ssh-timeout VALUE    Max time to wait for SSH in verify mode (default: ${SSH_TIMEOUT})
+    --post-create-timeout VALUE
+                           Max time to wait for postCreateCommand/pruva-verify
+                           in verify mode (default: ${POST_CREATE_TIMEOUT})
     --mode MODE            Test mode: available or verify (default: ${MODE}).
                            available waits for GitHub API state only, matching
                            the web UI creation path. verify waits for the
@@ -121,6 +125,19 @@ run_with_timeout() {
     timeout "$timeout_value" "$@"
   else
     "$@"
+  fi
+}
+
+duration_to_seconds() {
+  local value="$1"
+  if [[ "$value" =~ ^([0-9]+)m$ ]]; then
+    printf '%s\n' "$((${BASH_REMATCH[1]} * 60))"
+  elif [[ "$value" =~ ^([0-9]+)s$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  elif [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+  else
+    return 1
   fi
 }
 
@@ -204,11 +221,12 @@ wait_for_codespace_available() {
 wait_for_codespace_ssh() {
   local codespace="$1"
   local deadline=$((SECONDS + 600))
-  if [[ "$SSH_TIMEOUT" =~ ^([0-9]+)m$ ]]; then
-    deadline=$((SECONDS + (${BASH_REMATCH[1]} * 60)))
-  elif [[ "$SSH_TIMEOUT" =~ ^([0-9]+)s$ ]]; then
-    deadline=$((SECONDS + BASH_REMATCH[1]))
-  fi
+  local timeout_seconds
+  timeout_seconds=$(duration_to_seconds "$SSH_TIMEOUT") || {
+    fail "Invalid --ssh-timeout '${SSH_TIMEOUT}' (expected e.g. 10m or 600s)"
+    return 1
+  }
+  deadline=$((SECONDS + timeout_seconds))
 
   while [[ $SECONDS -lt $deadline ]]; do
     if gh codespace ssh --codespace "$codespace" -- true >/dev/null 2>&1; then
@@ -270,7 +288,12 @@ wait_for_codespace_post_create() {
   local codespace="$1"
   local repro_id="$2"
   local min_epoch="$3"
-  local deadline=$((SECONDS + 1800))
+  local timeout_seconds
+  timeout_seconds=$(duration_to_seconds "$POST_CREATE_TIMEOUT") || {
+    fail "Invalid --post-create-timeout '${POST_CREATE_TIMEOUT}' (expected e.g. 30m or 1800s)"
+    return 1
+  }
+  local deadline=$((SECONDS + timeout_seconds))
   local logs
   logs=$(mktemp)
 
@@ -739,6 +762,7 @@ run_parallel_repros() {
       --retention "$RETENTION_PERIOD"
       --create-timeout "$CREATE_TIMEOUT"
       --ssh-timeout "$SSH_TIMEOUT"
+      --post-create-timeout "$POST_CREATE_TIMEOUT"
       --mode "$MODE"
       --max-parallel 1
     )
@@ -847,6 +871,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ssh-timeout)
       SSH_TIMEOUT="$2"
+      shift 2
+      ;;
+    --post-create-timeout)
+      POST_CREATE_TIMEOUT="$2"
       shift 2
       ;;
     --mode)
