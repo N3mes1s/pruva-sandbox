@@ -1,0 +1,11 @@
+--- repro/reproduction_steps.sh
++++ repro/reproduction_steps.sh
+@@ -209,7 +209,7 @@
+ run_attempt() {
+   role="$1" version="$2" base="$3" port="$4" attempt="$5"
+   tag="${role}-${attempt}"
+-  disk="$ARTIFACTS/${tag}.qcow2" sock="$ARTIFACTS/${tag}.serial.sock"
++  disk="$ARTIFACTS/${tag}.qcow2" sock="${TMPDIR:-/tmp}/pruva-${tag}.serial.sock"
+   qlog="$LOGS/${tag}-qemu.log" setup="$LOGS/${tag}-setup.log"
+   trace="$REPRO_DIR/${tag}-ssh-state.log" obs="$REPRO_DIR/${tag}-client.json" verify="$REPRO_DIR/${tag}-serial-observation.log"
+   rm -f "$disk" "$sock" "$trace" "$obs" "$verify"
