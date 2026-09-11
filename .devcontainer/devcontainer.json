@@ -1,26 +1,15 @@
 {
-  "name": "Pruva Reproduction Environment",
-  "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
-  "postCreateCommand": "trap '' TTIN TTOU; if [ -n \"$REPRO_ID\" ]; then setsid -w pruva-verify \"$REPRO_ID\" </dev/null; else echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'; fi",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:4": {
-      "moby": false,
-      "dockerDashComposeVersion": "none",
-      "installDockerBuildx": true,
-      "iptablesSwitchAtRuntime": true
-    },
-    "./features/pruva-dind-backend": {
-    },
-    "ghcr.io/devcontainers/features/sshd:1": {
-      "version": "latest"
-    }
+  "containerEnv": {
+    "PRUVA_API_URL": "https://api.pruva.dev/v1",
+    "PRUVA_REPRO_CACHE_DIR": "/workspaces/pruva-sandbox/.pruva-repro-cache",
+    "PRUVA_SANDBOX": "true",
+    "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
+    "REPRO_ID": "REPRO-2026-00350"
   },
-  "overrideFeatureInstallOrder": [
-    "ghcr.io/devcontainers/features/docker-in-docker:4",
-    "./features/pruva-dind-backend",
-    "ghcr.io/devcontainers/features/sshd:1"
-  ],
   "customizations": {
+    "codespaces": {
+      "openFiles": []
+    },
     "vscode": {
       "extensions": [
         "ms-python.python"
@@ -28,17 +17,27 @@
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash"
       }
-    },
-    "codespaces": {
-      "openFiles": []
     }
   },
-  "remoteUser": "vscode",
-  "containerEnv": {
-    "PRUVA_SANDBOX": "true",
-    "PRUVA_API_URL": "https://api.pruva.dev/v1",
-    "PRUVA_SANDBOX_IMAGE": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
-    "PRUVA_REPRO_CACHE_DIR": "/workspaces/pruva-sandbox/.pruva-repro-cache",
-    "REPRO_ID": ""
-  }
+  "features": {
+    "./features/pruva-dind-backend": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
+      "dockerDashComposeVersion": "none",
+      "installDockerBuildx": true,
+      "iptablesSwitchAtRuntime": true,
+      "moby": false
+    },
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
+  "image": "ghcr.io/n3mes1s/pruva-sandbox@sha256:8096b2518d6022e13d68f885c3b8ded6b4fe607098b1a1ccbfb99abc004d1dc1",
+  "name": "Pruva Reproduction Environment",
+  "overrideFeatureInstallOrder": [
+    "ghcr.io/devcontainers/features/docker-in-docker:4",
+    "./features/pruva-dind-backend",
+    "ghcr.io/devcontainers/features/sshd:1"
+  ],
+  "postCreateCommand": "trap '' TTIN TTOU; if [ -n \"$REPRO_ID\" ]; then setsid -w pruva-verify \"$REPRO_ID\" </dev/null; else echo 'Welcome to Pruva Sandbox! Run: pruva-verify <REPRO-ID>'; fi",
+  "remoteUser": "vscode"
 }
